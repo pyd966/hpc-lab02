@@ -1,0 +1,46 @@
+#!/bin/bash
+#HPC --partition=lab2
+#HPC --cpu=16
+#HPC --output=output/vtune_%j.log
+#SBATCH -C socket=1
+
+set -euo pipefail
+
+if ! command -v vtune >/dev/null 2>&1; then
+    source /etc/profile.d/vtune.sh
+fi
+
+rm -rf build_vtune
+cmake -S . -B build_vtune
+cmake --build build_vtune -j 16
+
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}
+export OMP_PROC_BIND=${OMP_PROC_BIND:-close}
+export OMP_PLACES=${OMP_PLACES:-cores}
+
+ITER_S1=${ITER_S1:-100000}
+RUN_TAG=${SLURM_JOB_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
+RESULT_ROOT=${VTUNE_RESULT_ROOT:-vtune_results/${RUN_TAG}}
+
+mkdir -p "${RESULT_ROOT}"
+
+S1_COMMAND=(
+    ./build_vtune/lab2
+    1 256 128 16 4 "${ITER_S1}"
+    --benchmark
+)
+
+echo "===== S1: VTune HPC Performance ====="
+vtune -collect hpc-performance \
+    -knob analyze-openmp=true \
+    -knob collect-memory-bandwidth=true \
+    -result-dir "${RESULT_ROOT}/hpc-performance" \
+    -- "${S1_COMMAND[@]}"
+
+echo "===== S1: VTune Microarchitecture Exploration ====="
+vtune -collect microarchitecture-exploration \
+    -result-dir "${RESULT_ROOT}/microarchitecture-exploration" \
+    -- "${S1_COMMAND[@]}"
+
+echo "VTune results: ${RESULT_ROOT}"
+echo "Profiled binary: build_vtune/lab2"
