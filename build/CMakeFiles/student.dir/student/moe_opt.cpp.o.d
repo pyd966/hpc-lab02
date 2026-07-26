@@ -193,4 +193,5 @@ CMakeFiles/student.dir/student/moe_opt.cpp.o: \
  /usr/lib/gcc/x86_64-linux-gnu/14/include/amxcomplexintrin.h \
  /usr/lib/gcc/x86_64-linux-gnu/14/include/prfchwintrin.h \
  /usr/lib/gcc/x86_64-linux-gnu/14/include/keylockerintrin.h \
- /usr/lib/gcc/x86_64-linux-gnu/14/include/amxfp16intrin.h
+ /usr/lib/gcc/x86_64-linux-gnu/14/include/amxfp16intrin.h \
+ /usr/lib/gcc/x86_64-linux-gnu/14/include/omp.h

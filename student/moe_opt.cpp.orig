@@ -396,24 +396,12 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
         uint32_t activation4;
         std::memcpy(&activation4, hq_shifted + rb * 4, 4);
         __m512i activation = _mm512_set1_epi32((int)activation4);
-        for (int ob = 0; ob < down_output_blocks; ob += 4) {
-            const size_t offset0 =
+        for (int ob = 0; ob < down_output_blocks; ob++) {
+            const size_t offset =
                 ((size_t)rb * down_output_blocks + ob) * 64;
-            const size_t offset1 = offset0 + 64;
-            const size_t offset2 = offset0 + 128;
-            const size_t offset3 = offset0 + 192;
-            const __m512i weight0 = s1_load_weight(down + offset0);
-            const __m512i weight1 = s1_load_weight(down + offset1);
-            const __m512i weight2 = s1_load_weight(down + offset2);
-            const __m512i weight3 = s1_load_weight(down + offset3);
             down_acc[ob] = _mm512_dpbusd_epi32(
-                down_acc[ob], activation, weight0);
-            down_acc[ob + 1] = _mm512_dpbusd_epi32(
-                down_acc[ob + 1], activation, weight1);
-            down_acc[ob + 2] = _mm512_dpbusd_epi32(
-                down_acc[ob + 2], activation, weight2);
-            down_acc[ob + 3] = _mm512_dpbusd_epi32(
-                down_acc[ob + 3], activation, weight3);
+                down_acc[ob], activation,
+                _mm512_load_si512((const __m512i*)(down + offset)));
         }
     }
     const __m512 output_scale = _mm512_set1_ps(s_h * s_down);
@@ -522,13 +510,6 @@ static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
     const float s_x = quantize_s1_u8(x, S1_D_MODEL, xq_shifted);
     alignas(64) float expert_out[MAX_TOP_K + 1][S1_D_MODEL];
     const int expert_tasks = w.top_k + 1;
-    int worker_count = 1;
-#ifdef _OPENMP
-    worker_count = omp_get_max_threads();
-    if (worker_count > expert_tasks) worker_count = expert_tasks;
-#endif
-
-#pragma omp parallel for schedule(static, 1) num_threads(worker_count)
     for (int task = 0; task < expert_tasks; task++) {
         if (task == 0) {
             s1_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
