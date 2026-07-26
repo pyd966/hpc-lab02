@@ -1,0 +1,5 @@
+/home/h3250106394/lab02/build_perf/CMakeFiles/framework.dir
+/home/h3250106394/lab02/build_perf/CMakeFiles/student.dir
+/home/h3250106394/lab02/build_perf/CMakeFiles/lab2.dir
+/home/h3250106394/lab02/build_perf/CMakeFiles/edit_cache.dir
+/home/h3250106394/lab02/build_perf/CMakeFiles/rebuild_cache.dir

@@ -4,6 +4,11 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstring>
+
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+#include <immintrin.h>
+#endif
 
 static bool has_shape(const MoEWeights& w, int d_model, int d_ff,
                       int num_experts, int top_k) {
@@ -11,7 +16,85 @@ static bool has_shape(const MoEWeights& w, int d_model, int d_ff,
            w.num_experts == num_experts && w.top_k == top_k;
 }
 
-static void preprocess_s1(MoEWeights& w) {}
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+constexpr int S1_D_MODEL = 256;
+constexpr int S1_D_FF = 128;
+constexpr int S1_NUM_EXPERTS = 16;
+constexpr int S1_EXPERT_SLOTS = S1_NUM_EXPERTS + 1;
+constexpr size_t S1_MATRIX_SIZE = (size_t)S1_D_MODEL * S1_D_FF;
+
+alignas(64) static float s1_router_transposed[S1_D_MODEL * S1_NUM_EXPERTS];
+alignas(64) static int8_t
+    s1_gate_packed[S1_EXPERT_SLOTS * S1_MATRIX_SIZE];
+alignas(64) static int8_t
+    s1_up_packed[S1_EXPERT_SLOTS * S1_MATRIX_SIZE];
+alignas(64) static int8_t
+    s1_down_packed[S1_EXPERT_SLOTS * S1_MATRIX_SIZE];
+alignas(64) static int32_t
+    s1_gate_sums[S1_EXPERT_SLOTS * S1_D_FF];
+alignas(64) static int32_t s1_up_sums[S1_EXPERT_SLOTS * S1_D_FF];
+alignas(64) static int32_t s1_down_sums[S1_EXPERT_SLOTS * S1_D_MODEL];
+static bool s1_preprocessed = false;
+
+static void pack_s1_matrix(const int8_t* src, int output_dim,
+                           int reduction_dim, int8_t* packed,
+                           int32_t* row_sums) {
+    for (int o = 0; o < output_dim; o++) {
+        int32_t sum = 0;
+        for (int r = 0; r < reduction_dim; r++) {
+            sum += src[(size_t)o * reduction_dim + r];
+        }
+        row_sums[o] = sum;
+    }
+
+    const int reduction_blocks = reduction_dim / 4;
+    for (int ob = 0; ob < output_dim / 16; ob++) {
+        for (int rb = 0; rb < reduction_blocks; rb++) {
+            int8_t* block = packed +
+                            ((size_t)rb * (output_dim / 16) + ob) * 64;
+            for (int lane = 0; lane < 16; lane++) {
+                const int8_t* row =
+                    src + (size_t)(ob * 16 + lane) * reduction_dim + rb * 4;
+                std::memcpy(block + lane * 4, row, 4);
+            }
+        }
+    }
+}
+#endif
+
+static void preprocess_s1(MoEWeights& w) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+    for (int d = 0; d < S1_D_MODEL; d++) {
+        for (int e = 0; e < S1_NUM_EXPERTS; e++) {
+            s1_router_transposed[(size_t)d * S1_NUM_EXPERTS + e] =
+                w.w_router[(size_t)e * S1_D_MODEL + d];
+        }
+    }
+
+    pack_s1_matrix(w.sh_gate, S1_D_FF, S1_D_MODEL, s1_gate_packed,
+                   s1_gate_sums);
+    pack_s1_matrix(w.sh_up, S1_D_FF, S1_D_MODEL, s1_up_packed, s1_up_sums);
+    pack_s1_matrix(w.sh_down, S1_D_MODEL, S1_D_FF, s1_down_packed,
+                   s1_down_sums);
+
+    for (int e = 0; e < S1_NUM_EXPERTS; e++) {
+        const int slot = e + 1;
+        pack_s1_matrix(w.w_gate + (size_t)e * S1_MATRIX_SIZE, S1_D_FF,
+                       S1_D_MODEL,
+                       s1_gate_packed + (size_t)slot * S1_MATRIX_SIZE,
+                       s1_gate_sums + (size_t)slot * S1_D_FF);
+        pack_s1_matrix(w.w_up + (size_t)e * S1_MATRIX_SIZE, S1_D_FF,
+                       S1_D_MODEL,
+                       s1_up_packed + (size_t)slot * S1_MATRIX_SIZE,
+                       s1_up_sums + (size_t)slot * S1_D_FF);
+        pack_s1_matrix(w.w_down + (size_t)e * S1_MATRIX_SIZE, S1_D_MODEL,
+                       S1_D_FF,
+                       s1_down_packed + (size_t)slot * S1_MATRIX_SIZE,
+                       s1_down_sums + (size_t)slot * S1_D_MODEL);
+    }
+    s1_preprocessed = true;
+#endif
+}
 
 static void preprocess_s2(MoEWeights& w) {}
 
@@ -151,9 +234,278 @@ static void moe_forward_generic(const float* x, const MoEWeights& w, float* y,
     }
 }
 
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+static float quantize_s1_u8(const float* values, int count, uint8_t* shifted) {
+    const __m512i abs_mask = _mm512_set1_epi32(0x7fffffff);
+    __m512 max_abs = _mm512_setzero_ps();
+    for (int i = 0; i < count; i += 16) {
+        __m512 value = _mm512_loadu_ps(values + i);
+        __m512 absolute = _mm512_castsi512_ps(
+            _mm512_and_si512(_mm512_castps_si512(value), abs_mask));
+        max_abs = _mm512_max_ps(max_abs, absolute);
+    }
+
+    const float amax = _mm512_reduce_max_ps(max_abs);
+    const float scale = amax > 0.0f ? amax / 127.0f : 1.0f;
+    const __m512 scale_vector = _mm512_set1_ps(scale);
+    const __m128i sign_flip = _mm_set1_epi8((char)0x80);
+    for (int i = 0; i < count; i += 16) {
+        __m512 value = _mm512_loadu_ps(values + i);
+        __m512i quantized =
+            _mm512_cvtps_epi32(_mm512_div_ps(value, scale_vector));
+        __m128i bytes = _mm512_cvtsepi32_epi8(quantized);
+        _mm_store_si128((__m128i*)(shifted + i),
+                        _mm_xor_si128(bytes, sign_flip));
+    }
+    return scale;
+}
+
+static __m512i s1_corrected_accumulator(const int32_t* row_sums) {
+    __m512i correction =
+        _mm512_slli_epi32(_mm512_load_si512((const __m512i*)row_sums), 7);
+    return _mm512_sub_epi32(_mm512_setzero_si512(), correction);
+}
+
+static __m512 exp512_ps(__m512 x) {
+    const __m512 exp_hi = _mm512_set1_ps(88.3762626647949f);
+    const __m512 exp_lo = _mm512_set1_ps(-88.3762626647949f);
+    x = _mm512_min_ps(x, exp_hi);
+    x = _mm512_max_ps(x, exp_lo);
+
+    __m512 fx = _mm512_fmadd_ps(
+        x, _mm512_set1_ps(1.44269504088896341f), _mm512_set1_ps(0.5f));
+    fx = _mm512_floor_ps(fx);
+
+    x = _mm512_fnmadd_ps(fx, _mm512_set1_ps(0.693359375f), x);
+    x = _mm512_fnmadd_ps(fx, _mm512_set1_ps(-2.12194440e-4f), x);
+    const __m512 z = _mm512_mul_ps(x, x);
+
+    __m512 y = _mm512_set1_ps(1.9875691500e-4f);
+    y = _mm512_fmadd_ps(y, x, _mm512_set1_ps(1.3981999507e-3f));
+    y = _mm512_fmadd_ps(y, x, _mm512_set1_ps(8.3334519073e-3f));
+    y = _mm512_fmadd_ps(y, x, _mm512_set1_ps(4.1665795894e-2f));
+    y = _mm512_fmadd_ps(y, x, _mm512_set1_ps(1.6666665459e-1f));
+    y = _mm512_fmadd_ps(y, x, _mm512_set1_ps(5.0000001201e-1f));
+    y = _mm512_fmadd_ps(y, z, x);
+    y = _mm512_add_ps(y, _mm512_set1_ps(1.0f));
+
+    __m512i exponent = _mm512_cvttps_epi32(fx);
+    exponent = _mm512_add_epi32(exponent, _mm512_set1_epi32(0x7f));
+    exponent = _mm512_slli_epi32(exponent, 23);
+    return _mm512_mul_ps(y, _mm512_castsi512_ps(exponent));
+}
+
+static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
+                          const uint8_t* xq_shifted, float s_x, float* out) {
+    const int8_t* gate =
+        s1_gate_packed + (size_t)slot * S1_MATRIX_SIZE;
+    const int8_t* up = s1_up_packed + (size_t)slot * S1_MATRIX_SIZE;
+    const int8_t* down =
+        s1_down_packed + (size_t)slot * S1_MATRIX_SIZE;
+    const int32_t* gate_sums = s1_gate_sums + (size_t)slot * S1_D_FF;
+    const int32_t* up_sums = s1_up_sums + (size_t)slot * S1_D_FF;
+    const int32_t* down_sums =
+        s1_down_sums + (size_t)slot * S1_D_MODEL;
+
+    alignas(64) int32_t gate_acc[S1_D_FF];
+    alignas(64) int32_t up_acc[S1_D_FF];
+    constexpr int gate_reduction_blocks = S1_D_MODEL / 4;
+    constexpr int gate_output_blocks = S1_D_FF / 16;
+    __m512i acc_gate[gate_output_blocks];
+    __m512i acc_up[gate_output_blocks];
+    for (int ob = 0; ob < gate_output_blocks; ob++) {
+        acc_gate[ob] = s1_corrected_accumulator(gate_sums + ob * 16);
+        acc_up[ob] = s1_corrected_accumulator(up_sums + ob * 16);
+    }
+#pragma GCC unroll 64
+    for (int rb = 0; rb < gate_reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, xq_shifted + rb * 4, 4);
+        __m512i activation = _mm512_set1_epi32((int)activation4);
+        for (int ob = 0; ob < gate_output_blocks; ob++) {
+            const size_t offset =
+                ((size_t)rb * gate_output_blocks + ob) * 64;
+            acc_gate[ob] = _mm512_dpbusd_epi32(
+                acc_gate[ob], activation,
+                _mm512_load_si512((const __m512i*)(gate + offset)));
+            acc_up[ob] = _mm512_dpbusd_epi32(
+                acc_up[ob], activation,
+                _mm512_load_si512((const __m512i*)(up + offset)));
+        }
+    }
+    for (int ob = 0; ob < gate_output_blocks; ob++) {
+        _mm512_store_si512((__m512i*)(gate_acc + ob * 16), acc_gate[ob]);
+        _mm512_store_si512((__m512i*)(up_acc + ob * 16), acc_up[ob]);
+    }
+
+    alignas(64) float hidden[S1_D_FF];
+    const __m512 gate_scale = _mm512_set1_ps(s_x * s_gate);
+    const __m512 up_scale = _mm512_set1_ps(s_x * s_up);
+    const __m512 one = _mm512_set1_ps(1.0f);
+    for (int f = 0; f < S1_D_FF; f += 16) {
+        const __m512 vg = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(gate_acc + f))),
+            gate_scale);
+        const __m512 vu = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(up_acc + f))),
+            up_scale);
+        const __m512 silu = _mm512_div_ps(
+            vg, _mm512_add_ps(one, exp512_ps(_mm512_sub_ps(
+                                      _mm512_setzero_ps(), vg))));
+        _mm512_store_ps(hidden + f, _mm512_mul_ps(silu, vu));
+    }
+
+    alignas(64) uint8_t hq_shifted[S1_D_FF];
+    const float s_h = quantize_s1_u8(hidden, S1_D_FF, hq_shifted);
+    constexpr int down_reduction_blocks = S1_D_FF / 4;
+    constexpr int down_output_blocks = S1_D_MODEL / 16;
+    __m512i down_acc[down_output_blocks];
+    for (int ob = 0; ob < down_output_blocks; ob++) {
+        down_acc[ob] = s1_corrected_accumulator(down_sums + ob * 16);
+    }
+#pragma GCC unroll 32
+    for (int rb = 0; rb < down_reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, hq_shifted + rb * 4, 4);
+        __m512i activation = _mm512_set1_epi32((int)activation4);
+        for (int ob = 0; ob < down_output_blocks; ob++) {
+            const size_t offset =
+                ((size_t)rb * down_output_blocks + ob) * 64;
+            down_acc[ob] = _mm512_dpbusd_epi32(
+                down_acc[ob], activation,
+                _mm512_load_si512((const __m512i*)(down + offset)));
+        }
+    }
+    const __m512 output_scale = _mm512_set1_ps(s_h * s_down);
+    for (int ob = 0; ob < down_output_blocks; ob++) {
+        __m512 result =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(down_acc[ob]), output_scale);
+        _mm512_storeu_ps(out + ob * 16, result);
+    }
+}
+#endif
+
 static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
                                      float* y, int num_tokens) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+    if (!s1_preprocessed) {
+        moe_forward_generic(x, w, y, num_tokens);
+        return;
+    }
+
+    __m512 router_acc0 = _mm512_setzero_ps();
+    __m512 router_acc1 = _mm512_setzero_ps();
+    __m512 router_acc2 = _mm512_setzero_ps();
+    __m512 router_acc3 = _mm512_setzero_ps();
+    __m512 router_acc4 = _mm512_setzero_ps();
+    __m512 router_acc5 = _mm512_setzero_ps();
+    __m512 router_acc6 = _mm512_setzero_ps();
+    __m512 router_acc7 = _mm512_setzero_ps();
+    for (int d = 0; d < S1_D_MODEL; d += 8) {
+        router_acc0 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d]),
+            _mm512_load_ps(s1_router_transposed + (size_t)d * S1_NUM_EXPERTS),
+            router_acc0);
+        router_acc1 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 1]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 1) * S1_NUM_EXPERTS),
+            router_acc1);
+        router_acc2 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 2]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 2) * S1_NUM_EXPERTS),
+            router_acc2);
+        router_acc3 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 3]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 3) * S1_NUM_EXPERTS),
+            router_acc3);
+        router_acc4 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 4]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 4) * S1_NUM_EXPERTS),
+            router_acc4);
+        router_acc5 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 5]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 5) * S1_NUM_EXPERTS),
+            router_acc5);
+        router_acc6 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 6]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 6) * S1_NUM_EXPERTS),
+            router_acc6);
+        router_acc7 = _mm512_fmadd_ps(
+            _mm512_set1_ps(x[d + 7]),
+            _mm512_load_ps(s1_router_transposed +
+                           (size_t)(d + 7) * S1_NUM_EXPERTS),
+            router_acc7);
+    }
+    __m512 router_acc = _mm512_add_ps(
+        _mm512_add_ps(_mm512_add_ps(router_acc0, router_acc1),
+                      _mm512_add_ps(router_acc2, router_acc3)),
+        _mm512_add_ps(_mm512_add_ps(router_acc4, router_acc5),
+                      _mm512_add_ps(router_acc6, router_acc7)));
+
+    alignas(64) float affinity[S1_NUM_EXPERTS];
+    _mm512_store_ps(affinity, router_acc);
+    for (int e = 0; e < S1_NUM_EXPERTS; e++) {
+        affinity[e] = 1.0f / (1.0f + expf(-affinity[e]));
+    }
+
+    int topk_idx[MAX_TOP_K];
+    bool used[S1_NUM_EXPERTS] = {};
+    for (int k = 0; k < w.top_k; k++) {
+        int best = -1;
+        for (int e = 0; e < S1_NUM_EXPERTS; e++) {
+            if (used[e]) continue;
+            if (best < 0 ||
+                affinity[e] + w.bias[e] >
+                    affinity[best] + w.bias[best]) {
+                best = e;
+            }
+        }
+        used[best] = true;
+        topk_idx[k] = best;
+    }
+
+    float gate_sum = 0.0f;
+    for (int k = 0; k < w.top_k; k++) {
+        gate_sum += affinity[topk_idx[k]];
+    }
+
+    alignas(64) uint8_t xq_shifted[S1_D_MODEL];
+    const float s_x = quantize_s1_u8(x, S1_D_MODEL, xq_shifted);
+    alignas(64) float expert_out[S1_D_MODEL];
+
+    s1_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted, s_x,
+                  expert_out);
+    for (int d = 0; d < S1_D_MODEL; d += 16) {
+        _mm512_storeu_ps(
+            y + d,
+            _mm512_add_ps(_mm512_loadu_ps(x + d),
+                          _mm512_load_ps(expert_out + d)));
+    }
+
+    for (int k = 0; k < w.top_k; k++) {
+        const int expert = topk_idx[k];
+        const float gate = affinity[expert] / gate_sum;
+        s1_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
+                      w.s_down[expert], xq_shifted, s_x, expert_out);
+        const __m512 gate_vector = _mm512_set1_ps(gate);
+        for (int d = 0; d < S1_D_MODEL; d += 16) {
+            _mm512_storeu_ps(
+                y + d,
+                _mm512_fmadd_ps(gate_vector, _mm512_load_ps(expert_out + d),
+                                _mm512_loadu_ps(y + d)));
+        }
+    }
+#else
     moe_forward_generic(x, w, y, num_tokens);
+#endif
 }
 
 static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
