@@ -31,6 +31,13 @@ constexpr int S1_D_FF = 128;
 constexpr int S1_NUM_EXPERTS = 16;
 constexpr int S1_EXPERT_SLOTS = S1_NUM_EXPERTS + 1;
 constexpr size_t S1_MATRIX_SIZE = (size_t)S1_D_MODEL * S1_D_FF;
+constexpr int S2_D_MODEL = 1024;
+constexpr int S2_D_FF = 512;
+constexpr int S2_NUM_EXPERTS = 16;
+constexpr int S2_EXPERT_SLOTS = S2_NUM_EXPERTS + 1;
+constexpr int S2_GATE_TILE_BLOCKS = 8;
+constexpr int S2_DOWN_TILE_BLOCKS = 16;
+constexpr size_t S2_MATRIX_SIZE = (size_t)S2_D_MODEL * S2_D_FF;
 
 alignas(64) static float s1_router_transposed[S1_D_MODEL * S1_NUM_EXPERTS];
 alignas(64) static int8_t
@@ -45,6 +52,18 @@ alignas(64) static int32_t s1_up_sums[S1_EXPERT_SLOTS * S1_D_FF];
 alignas(64) static int32_t s1_down_sums[S1_EXPERT_SLOTS * S1_D_MODEL];
 static bool s1_preprocessed = false;
 static void start_s1_worker_pool();
+alignas(64) static float s2_router_transposed[S2_D_MODEL * S2_NUM_EXPERTS];
+alignas(64) static int8_t
+    s2_gate_packed[S2_EXPERT_SLOTS * S2_MATRIX_SIZE];
+alignas(64) static int8_t
+    s2_up_packed[S2_EXPERT_SLOTS * S2_MATRIX_SIZE];
+alignas(64) static int8_t
+    s2_down_packed[S2_EXPERT_SLOTS * S2_MATRIX_SIZE];
+alignas(64) static int32_t
+    s2_gate_sums[S2_EXPERT_SLOTS * S2_D_FF];
+alignas(64) static int32_t s2_up_sums[S2_EXPERT_SLOTS * S2_D_FF];
+alignas(64) static int32_t s2_down_sums[S2_EXPERT_SLOTS * S2_D_MODEL];
+static bool s2_preprocessed = false;
 
 static void pack_s1_matrix(const int8_t* src, int output_dim,
                            int reduction_dim, int8_t* packed,
@@ -66,6 +85,40 @@ static void pack_s1_matrix(const int8_t* src, int output_dim,
                 const int8_t* row =
                     src + (size_t)(ob * 16 + lane) * reduction_dim + rb * 4;
                 std::memcpy(block + lane * 4, row, 4);
+            }
+        }
+    }
+}
+
+static void pack_s2_matrix(const int8_t* src, int output_dim,
+                           int reduction_dim, int tile_blocks, int8_t* packed,
+                           int32_t* row_sums) {
+    const int output_blocks = output_dim / 16;
+    const int reduction_blocks = reduction_dim / 4;
+    const int tile_count = output_blocks / tile_blocks;
+
+    for (int o = 0; o < output_dim; o++) {
+        int32_t sum = 0;
+        for (int r = 0; r < reduction_dim; r++) {
+            sum += src[(size_t)o * reduction_dim + r];
+        }
+        row_sums[o] = sum;
+    }
+
+    for (int tile = 0; tile < tile_count; tile++) {
+        for (int rb = 0; rb < reduction_blocks; rb++) {
+            for (int local_ob = 0; local_ob < tile_blocks; local_ob++) {
+                const int ob = tile * tile_blocks + local_ob;
+                int8_t* block =
+                    packed +
+                    ((size_t)(tile * reduction_blocks + rb) * tile_blocks +
+                     local_ob) *
+                        64;
+                for (int lane = 0; lane < 16; lane++) {
+                    const int8_t* row =
+                        src + (size_t)(ob * 16 + lane) * reduction_dim + rb * 4;
+                    std::memcpy(block + lane * 4, row, 4);
+                }
             }
         }
     }
@@ -107,7 +160,42 @@ static void preprocess_s1(MoEWeights& w) {
 #endif
 }
 
-static void preprocess_s2(MoEWeights& w) {}
+static void preprocess_s2(MoEWeights& w) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+    for (int d = 0; d < S2_D_MODEL; d++) {
+        for (int e = 0; e < S2_NUM_EXPERTS; e++) {
+            s2_router_transposed[(size_t)d * S2_NUM_EXPERTS + e] =
+                w.w_router[(size_t)e * S2_D_MODEL + d];
+        }
+    }
+
+    pack_s2_matrix(w.sh_gate, S2_D_FF, S2_D_MODEL, S2_GATE_TILE_BLOCKS,
+                   s2_gate_packed, s2_gate_sums);
+    pack_s2_matrix(w.sh_up, S2_D_FF, S2_D_MODEL, S2_GATE_TILE_BLOCKS,
+                   s2_up_packed, s2_up_sums);
+    pack_s2_matrix(w.sh_down, S2_D_MODEL, S2_D_FF, S2_DOWN_TILE_BLOCKS,
+                   s2_down_packed, s2_down_sums);
+
+    for (int e = 0; e < S2_NUM_EXPERTS; e++) {
+        const int slot = e + 1;
+        pack_s2_matrix(
+            w.w_gate + (size_t)e * S2_MATRIX_SIZE, S2_D_FF, S2_D_MODEL,
+            S2_GATE_TILE_BLOCKS,
+            s2_gate_packed + (size_t)slot * S2_MATRIX_SIZE,
+            s2_gate_sums + (size_t)slot * S2_D_FF);
+        pack_s2_matrix(w.w_up + (size_t)e * S2_MATRIX_SIZE, S2_D_FF,
+                       S2_D_MODEL, S2_GATE_TILE_BLOCKS,
+                       s2_up_packed + (size_t)slot * S2_MATRIX_SIZE,
+                       s2_up_sums + (size_t)slot * S2_D_FF);
+        pack_s2_matrix(
+            w.w_down + (size_t)e * S2_MATRIX_SIZE, S2_D_MODEL, S2_D_FF,
+            S2_DOWN_TILE_BLOCKS,
+            s2_down_packed + (size_t)slot * S2_MATRIX_SIZE,
+            s2_down_sums + (size_t)slot * S2_D_MODEL);
+    }
+    s2_preprocessed = true;
+#endif
+}
 
 static void preprocess_s3(MoEWeights& w) {}
 
@@ -284,6 +372,15 @@ static inline __m512i s1_load_weight(const int8_t* weights) {
     return value;
 }
 
+static inline __m512i s2_dpbusd_mem(__m512i accumulator,
+                                    __m512i activation,
+                                    const int8_t* weights) {
+    asm("vpdpbusd %2, %1, %0"
+        : "+v"(accumulator)
+        : "v"(activation), "m"(*(const __m512i*)weights));
+    return accumulator;
+}
+
 static __m512 exp512_ps(__m512 x) {
     const __m512 exp_hi = _mm512_set1_ps(88.3762626647949f);
     const __m512 exp_lo = _mm512_set1_ps(-88.3762626647949f);
@@ -428,6 +525,164 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
         __m512 result =
             _mm512_mul_ps(_mm512_cvtepi32_ps(down_acc[ob]), output_scale);
         _mm512_storeu_ps(out + ob * 16, result);
+    }
+}
+
+__attribute__((noinline)) static void s2_gate_up_dot_tile(
+    const int8_t* gate, const int8_t* up, const int32_t* gate_sums,
+    const int32_t* up_sums, const uint8_t* xq_shifted, int32_t* gate_out,
+    int32_t* up_out) {
+    __m512i acc_gate[S2_GATE_TILE_BLOCKS];
+    __m512i acc_up[S2_GATE_TILE_BLOCKS];
+#pragma GCC unroll 8
+    for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS; local_ob++) {
+        acc_gate[local_ob] =
+            s1_corrected_accumulator(gate_sums + local_ob * 16);
+        acc_up[local_ob] =
+            s1_corrected_accumulator(up_sums + local_ob * 16);
+    }
+
+    constexpr int reduction_blocks = S2_D_MODEL / 4;
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, xq_shifted + rb * 4, 4);
+        const __m512i activation = _mm512_set1_epi32((int)activation4);
+#pragma GCC unroll 4
+        for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS;
+             local_ob += 2) {
+            const size_t offset0 =
+                ((size_t)rb * S2_GATE_TILE_BLOCKS + local_ob) * 64;
+            const size_t offset1 = offset0 + 64;
+            acc_gate[local_ob] = s2_dpbusd_mem(
+                acc_gate[local_ob], activation, gate + offset0);
+            acc_up[local_ob] = s2_dpbusd_mem(
+                acc_up[local_ob], activation, up + offset0);
+            acc_gate[local_ob + 1] = s2_dpbusd_mem(
+                acc_gate[local_ob + 1], activation, gate + offset1);
+            acc_up[local_ob + 1] = s2_dpbusd_mem(
+                acc_up[local_ob + 1], activation, up + offset1);
+        }
+    }
+
+#pragma GCC unroll 8
+    for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS; local_ob++) {
+        _mm512_store_si512((__m512i*)(gate_out + local_ob * 16),
+                           acc_gate[local_ob]);
+        _mm512_store_si512((__m512i*)(up_out + local_ob * 16),
+                           acc_up[local_ob]);
+    }
+}
+
+__attribute__((noinline)) static void s2_down_dot_tile(
+    const int8_t* down, const int32_t* down_sums,
+    const uint8_t* hq_shifted, int32_t* down_out) {
+    __m512i down_acc[S2_DOWN_TILE_BLOCKS];
+#pragma GCC unroll 16
+    for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS; local_ob++) {
+        down_acc[local_ob] =
+            s1_corrected_accumulator(down_sums + local_ob * 16);
+    }
+
+    constexpr int reduction_blocks = S2_D_FF / 4;
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, hq_shifted + rb * 4, 4);
+        const __m512i activation = _mm512_set1_epi32((int)activation4);
+#pragma GCC unroll 4
+        for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS;
+             local_ob += 4) {
+            const size_t offset0 =
+                ((size_t)rb * S2_DOWN_TILE_BLOCKS + local_ob) * 64;
+            down_acc[local_ob] = s2_dpbusd_mem(
+                down_acc[local_ob], activation, down + offset0);
+            down_acc[local_ob + 1] = s2_dpbusd_mem(
+                down_acc[local_ob + 1], activation, down + offset0 + 64);
+            down_acc[local_ob + 2] = s2_dpbusd_mem(
+                down_acc[local_ob + 2], activation, down + offset0 + 128);
+            down_acc[local_ob + 3] = s2_dpbusd_mem(
+                down_acc[local_ob + 3], activation, down + offset0 + 192);
+        }
+    }
+
+#pragma GCC unroll 16
+    for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS; local_ob++) {
+        _mm512_store_si512((__m512i*)(down_out + local_ob * 16),
+                           down_acc[local_ob]);
+    }
+}
+
+static void s2_expert_ffn(int slot, float s_gate, float s_up, float s_down,
+                          const uint8_t* xq_shifted, float s_x, float* out) {
+    const int8_t* gate =
+        s2_gate_packed + (size_t)slot * S2_MATRIX_SIZE;
+    const int8_t* up = s2_up_packed + (size_t)slot * S2_MATRIX_SIZE;
+    const int8_t* down =
+        s2_down_packed + (size_t)slot * S2_MATRIX_SIZE;
+    const int32_t* gate_sums = s2_gate_sums + (size_t)slot * S2_D_FF;
+    const int32_t* up_sums = s2_up_sums + (size_t)slot * S2_D_FF;
+    const int32_t* down_sums =
+        s2_down_sums + (size_t)slot * S2_D_MODEL;
+
+    constexpr int gate_reduction_blocks = S2_D_MODEL / 4;
+    constexpr int gate_output_blocks = S2_D_FF / 16;
+    constexpr int gate_tile_count =
+        gate_output_blocks / S2_GATE_TILE_BLOCKS;
+    alignas(64) float hidden[S2_D_FF];
+    const __m512 gate_scale = _mm512_set1_ps(s_x * s_gate);
+    const __m512 up_scale = _mm512_set1_ps(s_x * s_up);
+    const __m512 one = _mm512_set1_ps(1.0f);
+
+    for (int tile = 0; tile < gate_tile_count; tile++) {
+        alignas(64) __m512i acc_gate[S2_GATE_TILE_BLOCKS];
+        alignas(64) __m512i acc_up[S2_GATE_TILE_BLOCKS];
+        const size_t tile_base =
+            (size_t)tile * gate_reduction_blocks * S2_GATE_TILE_BLOCKS * 64;
+        s2_gate_up_dot_tile(
+            gate + tile_base, up + tile_base,
+            gate_sums + tile * S2_GATE_TILE_BLOCKS * 16,
+            up_sums + tile * S2_GATE_TILE_BLOCKS * 16, xq_shifted,
+            (int32_t*)acc_gate, (int32_t*)acc_up);
+
+#pragma GCC unroll 8
+        for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS; local_ob++) {
+            const int global_ob = tile * S2_GATE_TILE_BLOCKS + local_ob;
+            const __m512 vg = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(acc_gate[local_ob]), gate_scale);
+            const __m512 vu = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(acc_up[local_ob]), up_scale);
+            const __m512 denominator = _mm512_add_ps(
+                one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
+            const __m512 silu =
+                _mm512_mul_ps(vg, reciprocal512_ps(denominator));
+            _mm512_store_ps(hidden + global_ob * 16,
+                            _mm512_mul_ps(silu, vu));
+        }
+    }
+
+    alignas(64) uint8_t hq_shifted[S2_D_FF];
+    const float s_h = quantize_s1_u8(hidden, S2_D_FF, hq_shifted);
+    constexpr int down_reduction_blocks = S2_D_FF / 4;
+    constexpr int down_output_blocks = S2_D_MODEL / 16;
+    constexpr int down_tile_count =
+        down_output_blocks / S2_DOWN_TILE_BLOCKS;
+    const __m512 output_scale = _mm512_set1_ps(s_h * s_down);
+
+    for (int tile = 0; tile < down_tile_count; tile++) {
+        alignas(64) __m512i down_acc[S2_DOWN_TILE_BLOCKS];
+        const size_t tile_base =
+            (size_t)tile * down_reduction_blocks * S2_DOWN_TILE_BLOCKS * 64;
+        s2_down_dot_tile(
+            down + tile_base,
+            down_sums + tile * S2_DOWN_TILE_BLOCKS * 16, hq_shifted,
+            (int32_t*)down_acc);
+
+#pragma GCC unroll 16
+        for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS; local_ob++) {
+            const int global_ob = tile * S2_DOWN_TILE_BLOCKS + local_ob;
+            const __m512 result = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(down_acc[local_ob]), output_scale);
+            _mm512_storeu_ps(out + global_ob * 16, result);
+        }
     }
 }
 
@@ -715,7 +970,105 @@ static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
 
 static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
                                      float* y, int num_tokens) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__)
+    if (!s2_preprocessed) {
+        moe_forward_generic(x, w, y, num_tokens);
+        return;
+    }
+
+    __m512 router_acc[8] = {
+        _mm512_setzero_ps(), _mm512_setzero_ps(),
+        _mm512_setzero_ps(), _mm512_setzero_ps(),
+        _mm512_setzero_ps(), _mm512_setzero_ps(),
+        _mm512_setzero_ps(), _mm512_setzero_ps()};
+    for (int d = 0; d < S2_D_MODEL; d += 8) {
+#pragma GCC unroll 8
+        for (int u = 0; u < 8; u++) {
+            router_acc[u] = _mm512_fmadd_ps(
+                _mm512_set1_ps(x[d + u]),
+                _mm512_load_ps(s2_router_transposed +
+                               (size_t)(d + u) * S2_NUM_EXPERTS),
+                router_acc[u]);
+        }
+    }
+    const __m512 router_sum0 =
+        _mm512_add_ps(router_acc[0], router_acc[1]);
+    const __m512 router_sum1 =
+        _mm512_add_ps(router_acc[2], router_acc[3]);
+    const __m512 router_sum2 =
+        _mm512_add_ps(router_acc[4], router_acc[5]);
+    const __m512 router_sum3 =
+        _mm512_add_ps(router_acc[6], router_acc[7]);
+    const __m512 router_vector = _mm512_add_ps(
+        _mm512_add_ps(router_sum0, router_sum1),
+        _mm512_add_ps(router_sum2, router_sum3));
+
+    const __m512 affinity_vector = reciprocal512_ps(_mm512_add_ps(
+        _mm512_set1_ps(1.0f),
+        exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), router_vector))));
+    alignas(64) float affinity[S2_NUM_EXPERTS];
+    _mm512_store_ps(affinity, affinity_vector);
+
+    int topk_idx[MAX_TOP_K];
+    const __m512 selection_scores =
+        _mm512_add_ps(affinity_vector, _mm512_loadu_ps(w.bias));
+    const __m512 negative_infinity = _mm512_set1_ps(-3.402823466e+38F);
+    __mmask16 available = 0xffff;
+    for (int k = 0; k < w.top_k; k++) {
+        const __m512 candidates =
+            _mm512_mask_mov_ps(negative_infinity, available, selection_scores);
+        const float best_score = _mm512_reduce_max_ps(candidates);
+        const __mmask16 matches =
+            available &
+            _mm512_cmp_ps_mask(candidates, _mm512_set1_ps(best_score),
+                               _CMP_EQ_OQ);
+        const int best = __builtin_ctz((unsigned)matches);
+        topk_idx[k] = best;
+        available = (__mmask16)(available & (__mmask16)~(1u << best));
+    }
+
+    float gate_sum = 0.0f;
+    for (int k = 0; k < w.top_k; k++) {
+        gate_sum += affinity[topk_idx[k]];
+    }
+
+    alignas(64) uint8_t xq_shifted[S2_D_MODEL];
+    const float s_x = quantize_s1_u8(x, S2_D_MODEL, xq_shifted);
+    alignas(64) float expert_out[MAX_TOP_K + 1][S2_D_MODEL];
+    for (int task = 0; task < w.top_k + 1; task++) {
+        if (task == 0) {
+            s2_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
+                          s_x, expert_out[0]);
+        } else {
+            const int expert = topk_idx[task - 1];
+            s2_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
+                          w.s_down[expert], xq_shifted, s_x,
+                          expert_out[task]);
+        }
+    }
+
+    for (int d = 0; d < S2_D_MODEL; d += 16) {
+        _mm512_storeu_ps(
+            y + d,
+            _mm512_add_ps(_mm512_loadu_ps(x + d),
+                          _mm512_load_ps(expert_out[0] + d)));
+    }
+
+    for (int k = 0; k < w.top_k; k++) {
+        const int expert = topk_idx[k];
+        const __m512 gate_vector =
+            _mm512_set1_ps(affinity[expert] / gate_sum);
+        for (int d = 0; d < S2_D_MODEL; d += 16) {
+            _mm512_storeu_ps(
+                y + d,
+                _mm512_fmadd_ps(
+                    gate_vector, _mm512_load_ps(expert_out[k + 1] + d),
+                    _mm512_loadu_ps(y + d)));
+        }
+    }
+#else
     moe_forward_generic(x, w, y, num_tokens);
+#endif
 }
 
 static void moe_forward_optimized_s3(const float* x, const MoEWeights& w,

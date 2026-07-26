@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/lab2.dir/link.d CMakeFiles/framework.dir/main.cpp.o CMakeFiles/framework.dir/src/moe_ref.cpp.o CMakeFiles/framework.dir/src/data.cpp.o CMakeFiles/student.dir/student/moe_opt.cpp.o -o lab2  /usr/lib/gcc/x86_64-linux-gnu/14/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.a
