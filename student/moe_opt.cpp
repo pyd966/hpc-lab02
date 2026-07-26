@@ -1035,6 +1035,13 @@ static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
     alignas(64) uint8_t xq_shifted[S2_D_MODEL];
     const float s_x = quantize_s1_u8(x, S2_D_MODEL, xq_shifted);
     alignas(64) float expert_out[MAX_TOP_K + 1][S2_D_MODEL];
+#ifdef _OPENMP
+    int expert_threads = omp_get_max_threads();
+    if (expert_threads > w.top_k + 1) expert_threads = w.top_k + 1;
+#else
+    constexpr int expert_threads = 1;
+#endif
+#pragma omp parallel for schedule(static) num_threads(expert_threads)
     for (int task = 0; task < w.top_k + 1; task++) {
         if (task == 0) {
             s2_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
