@@ -1,0 +1,76 @@
+-- The C compiler identification is GNU 14.2.0
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test COMPILER_SUPPORTS_SPR
+-- Performing Test COMPILER_SUPPORTS_SPR - Success
+-- Configuring done (17.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/h3250106394/lab02/build_perf
+[ 60%] Building CXX object CMakeFiles/framework.dir/main.cpp.o
+[ 60%] Building CXX object CMakeFiles/framework.dir/src/moe_ref.cpp.o
+[ 60%] Building CXX object CMakeFiles/student.dir/student/moe_opt.cpp.o
+[ 80%] Building CXX object CMakeFiles/framework.dir/src/data.cpp.o
+[ 80%] Built target framework
+[ 80%] Built target student
+[100%] Linking CXX executable lab2
+[100%] Built target lab2
+===== S1: perf stat --topdown =====
+problem size: num_tokens=1 d_model=256 d_ff=128 num_experts=16 top_k=4 (100000 iterations)
+Optimized time: 0.470091 s
+Result is correct! (rel RMSE: 7.08279e-08, worst token: 7.08279e-08 at 0)
+
+ Performance counter stats for './build_perf/lab2 1 256 128 16 4 100000 --benchmark':
+
+ %  tma_backend_bound      %  tma_retiring %  tma_bad_speculation %  tma_frontend_bound 
+                        63.5                 27.4                             0.0                            9.0 
+
+       0.484691749 seconds time elapsed
+
+       0.472830000 seconds user
+       0.012021000 seconds sys
+
+
+===== S1: perf stat --topdown --td-level 2 =====
+problem size: num_tokens=1 d_model=256 d_ff=128 num_experts=16 top_k=4 (100000 iterations)
+Optimized time: 0.472093 s
+Result is correct! (rel RMSE: 7.08279e-08, worst token: 7.08279e-08 at 0)
+
+ Performance counter stats for './build_perf/lab2 1 256 128 16 4 100000 --benchmark':
+
+ %  tma_branch_mispredicts    %  tma_core_bound %  tma_heavy_operations %  tma_light_operations  %  tma_memory_bound %  tma_fetch_bandwidth %  tma_fetch_latency %  tma_machine_clears 
+                               0.0                         49.0                             10.2                             16.9                         14.9                             9.0                         -0.0                            0.0 
+
+       0.485239456 seconds time elapsed
+
+       0.481393000 seconds user
+       0.004011000 seconds sys
+
+
+===== S1: perf stat --cycles,instructions,branches,branch-misses,cache-misses =====
+problem size: num_tokens=1 d_model=256 d_ff=128 num_experts=16 top_k=4 (100000 iterations)
+Optimized time: 0.475459 s
+Result is correct! (rel RMSE: 7.08279e-08, worst token: 7.08279e-08 at 0)
+
+ Performance counter stats for './build_perf/lab2 1 256 128 16 4 100000 --benchmark':
+
+        1355467972      cycles:u                                                              
+        1391650231      instructions:u                   #    1.03  insn per cycle            
+          23147616      branches:u                                                            
+             20509      branch-misses:u                  #    0.09% of all branches           
+             84558      cache-misses:u                                                        
+
+       0.489407000 seconds time elapsed
+
+       0.481641000 seconds user
+       0.007961000 seconds sys
+
+

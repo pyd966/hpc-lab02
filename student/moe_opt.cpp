@@ -247,12 +247,13 @@ static float quantize_s1_u8(const float* values, int count, uint8_t* shifted) {
 
     const float amax = _mm512_reduce_max_ps(max_abs);
     const float scale = amax > 0.0f ? amax / 127.0f : 1.0f;
-    const __m512 scale_vector = _mm512_set1_ps(scale);
+    const float inverse_scale = amax > 0.0f ? 127.0f / amax : 1.0f;
+    const __m512 inverse_scale_vector = _mm512_set1_ps(inverse_scale);
     const __m128i sign_flip = _mm_set1_epi8((char)0x80);
     for (int i = 0; i < count; i += 16) {
         __m512 value = _mm512_loadu_ps(values + i);
         __m512i quantized =
-            _mm512_cvtps_epi32(_mm512_div_ps(value, scale_vector));
+            _mm512_cvtps_epi32(_mm512_mul_ps(value, inverse_scale_vector));
         __m128i bytes = _mm512_cvtsepi32_epi8(quantized);
         _mm_store_si128((__m128i*)(shifted + i),
                         _mm_xor_si128(bytes, sign_flip));
@@ -293,6 +294,13 @@ static __m512 exp512_ps(__m512 x) {
     exponent = _mm512_add_epi32(exponent, _mm512_set1_epi32(0x7f));
     exponent = _mm512_slli_epi32(exponent, 23);
     return _mm512_mul_ps(y, _mm512_castsi512_ps(exponent));
+}
+
+static __m512 reciprocal512_ps(__m512 x) {
+    __m512 reciprocal = _mm512_rcp14_ps(x);
+    return _mm512_mul_ps(
+        reciprocal,
+        _mm512_fnmadd_ps(x, reciprocal, _mm512_set1_ps(2.0f)));
 }
 
 static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
@@ -351,9 +359,10 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
             _mm512_cvtepi32_ps(
                 _mm512_load_si512((const __m512i*)(up_acc + f))),
             up_scale);
-        const __m512 silu = _mm512_div_ps(
-            vg, _mm512_add_ps(one, exp512_ps(_mm512_sub_ps(
-                                      _mm512_setzero_ps(), vg))));
+        const __m512 denominator = _mm512_add_ps(
+            one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
+        const __m512 silu =
+            _mm512_mul_ps(vg, reciprocal512_ps(denominator));
         _mm512_store_ps(hidden + f, _mm512_mul_ps(silu, vu));
     }
 
@@ -450,26 +459,29 @@ static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
         _mm512_add_ps(_mm512_add_ps(router_acc4, router_acc5),
                       _mm512_add_ps(router_acc6, router_acc7)));
 
+    const __m512 affinity_vector = reciprocal512_ps(_mm512_add_ps(
+        _mm512_set1_ps(1.0f),
+        exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), router_acc))));
     alignas(64) float affinity[S1_NUM_EXPERTS];
-    _mm512_store_ps(affinity, router_acc);
-    for (int e = 0; e < S1_NUM_EXPERTS; e++) {
-        affinity[e] = 1.0f / (1.0f + expf(-affinity[e]));
-    }
+    _mm512_store_ps(affinity, affinity_vector);
 
     int topk_idx[MAX_TOP_K];
-    bool used[S1_NUM_EXPERTS] = {};
+    const __m512 selection_scores =
+        _mm512_add_ps(affinity_vector, _mm512_loadu_ps(w.bias));
+    const __m512 negative_infinity = _mm512_set1_ps(-3.402823466e+38F);
+    __mmask16 available = 0xffff;
     for (int k = 0; k < w.top_k; k++) {
-        int best = -1;
-        for (int e = 0; e < S1_NUM_EXPERTS; e++) {
-            if (used[e]) continue;
-            if (best < 0 ||
-                affinity[e] + w.bias[e] >
-                    affinity[best] + w.bias[best]) {
-                best = e;
-            }
-        }
-        used[best] = true;
+        const __m512 candidates =
+            _mm512_mask_mov_ps(negative_infinity, available, selection_scores);
+        const float best_score = _mm512_reduce_max_ps(candidates);
+        const __mmask16 matches =
+            available &
+            _mm512_cmp_ps_mask(candidates, _mm512_set1_ps(best_score),
+                               _CMP_EQ_OQ);
+        const int best = __builtin_ctz((unsigned)matches);
         topk_idx[k] = best;
+        available =
+            (__mmask16)(available & (__mmask16)~(1u << best));
     }
 
     float gate_sum = 0.0f;
