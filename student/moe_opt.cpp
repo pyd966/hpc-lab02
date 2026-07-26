@@ -10,6 +10,10 @@
 #include <immintrin.h>
 #endif
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 static bool has_shape(const MoEWeights& w, int d_model, int d_ff,
                       int num_experts, int top_k) {
     return w.d_model == d_model && w.d_ff == d_ff &&
@@ -491,28 +495,44 @@ static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
 
     alignas(64) uint8_t xq_shifted[S1_D_MODEL];
     const float s_x = quantize_s1_u8(x, S1_D_MODEL, xq_shifted);
-    alignas(64) float expert_out[S1_D_MODEL];
+    alignas(64) float expert_out[MAX_TOP_K + 1][S1_D_MODEL];
+    const int expert_tasks = w.top_k + 1;
+    int worker_count = 1;
+#ifdef _OPENMP
+    worker_count = omp_get_max_threads();
+    if (worker_count > expert_tasks) worker_count = expert_tasks;
+#endif
 
-    s1_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted, s_x,
-                  expert_out);
+#pragma omp parallel for schedule(static, 1) num_threads(worker_count)
+    for (int task = 0; task < expert_tasks; task++) {
+        if (task == 0) {
+            s1_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
+                          s_x, expert_out[0]);
+        } else {
+            const int expert = topk_idx[task - 1];
+            s1_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
+                          w.s_down[expert], xq_shifted, s_x,
+                          expert_out[task]);
+        }
+    }
+
     for (int d = 0; d < S1_D_MODEL; d += 16) {
         _mm512_storeu_ps(
             y + d,
             _mm512_add_ps(_mm512_loadu_ps(x + d),
-                          _mm512_load_ps(expert_out + d)));
+                          _mm512_load_ps(expert_out[0] + d)));
     }
 
     for (int k = 0; k < w.top_k; k++) {
         const int expert = topk_idx[k];
         const float gate = affinity[expert] / gate_sum;
-        s1_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
-                      w.s_down[expert], xq_shifted, s_x, expert_out);
         const __m512 gate_vector = _mm512_set1_ps(gate);
         for (int d = 0; d < S1_D_MODEL; d += 16) {
             _mm512_storeu_ps(
                 y + d,
-                _mm512_fmadd_ps(gate_vector, _mm512_load_ps(expert_out + d),
-                                _mm512_loadu_ps(y + d)));
+                _mm512_fmadd_ps(
+                    gate_vector, _mm512_load_ps(expert_out[k + 1] + d),
+                    _mm512_loadu_ps(y + d)));
         }
     }
 #else
