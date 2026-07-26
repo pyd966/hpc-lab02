@@ -5,7 +5,35 @@
 #include <cmath>
 #include <cstddef>
 
-void preprocess(MoEWeights& w) {}
+static bool has_shape(const MoEWeights& w, int d_model, int d_ff,
+                      int num_experts, int top_k) {
+    return w.d_model == d_model && w.d_ff == d_ff &&
+           w.num_experts == num_experts && w.top_k == top_k;
+}
+
+static void preprocess_s1(MoEWeights& w) {}
+
+static void preprocess_s2(MoEWeights& w) {}
+
+static void preprocess_s3(MoEWeights& w) {}
+
+static void preprocess_s4(MoEWeights& w) {}
+
+void preprocess(MoEWeights& w) {
+    if (has_shape(w, 256, 128, 16, 4)) {
+        // S1 and S3 differ only in num_tokens, which is not available here.
+        preprocess_s1(w);
+        preprocess_s3(w);
+        return;
+    }
+    if (has_shape(w, 1024, 512, 16, 4)) {
+        preprocess_s2(w);
+        return;
+    }
+    if (has_shape(w, 512, 128, 512, 2)) {
+        preprocess_s4(w);
+    }
+}
 
 static void my_expert_ffn(const int8_t* w_gate, const int8_t* w_up,
                        const int8_t* w_down, float s_gate, float s_up,
@@ -46,8 +74,8 @@ static void my_expert_ffn(const int8_t* w_gate, const int8_t* w_up,
     }
 }
 
-void moe_forward_optimized(const float* x, const MoEWeights& w, float* y,
-                     int num_tokens) {
+static void moe_forward_generic(const float* x, const MoEWeights& w, float* y,
+                                int num_tokens) {
     const int d_model = w.d_model;
     const int d_ff = w.d_ff;
     const int num_experts = w.num_experts;
@@ -121,4 +149,46 @@ void moe_forward_optimized(const float* x, const MoEWeights& w, float* y,
             }
         }
     }
+}
+
+static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
+                                     float* y, int num_tokens) {
+    moe_forward_generic(x, w, y, num_tokens);
+}
+
+static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
+                                     float* y, int num_tokens) {
+    moe_forward_generic(x, w, y, num_tokens);
+}
+
+static void moe_forward_optimized_s3(const float* x, const MoEWeights& w,
+                                     float* y, int num_tokens) {
+    moe_forward_generic(x, w, y, num_tokens);
+}
+
+static void moe_forward_optimized_s4(const float* x, const MoEWeights& w,
+                                     float* y, int num_tokens) {
+    moe_forward_generic(x, w, y, num_tokens);
+}
+
+void moe_forward_optimized(const float* x, const MoEWeights& w, float* y,
+                           int num_tokens) {
+    if (num_tokens == 1 && has_shape(w, 256, 128, 16, 4)) {
+        moe_forward_optimized_s1(x, w, y, num_tokens);
+        return;
+    }
+    if (num_tokens == 1 && has_shape(w, 1024, 512, 16, 4)) {
+        moe_forward_optimized_s2(x, w, y, num_tokens);
+        return;
+    }
+    if (num_tokens == 128 && has_shape(w, 256, 128, 16, 4)) {
+        moe_forward_optimized_s3(x, w, y, num_tokens);
+        return;
+    }
+    if (num_tokens == 1024 && has_shape(w, 512, 128, 512, 2)) {
+        moe_forward_optimized_s4(x, w, y, num_tokens);
+        return;
+    }
+
+    moe_forward_generic(x, w, y, num_tokens);
 }
