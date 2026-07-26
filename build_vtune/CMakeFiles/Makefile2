@@ -57,7 +57,7 @@ EQUALS = =
 CMAKE_SOURCE_DIR = /home/h3250106394/lab02
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/h3250106394/lab02/build
+CMAKE_BINARY_DIR = /home/h3250106394/lab02/build_vtune
 
 #=============================================================================
 # Directory level rules for the build root directory
@@ -91,14 +91,14 @@ clean: CMakeFiles/lab2.dir/clean
 CMakeFiles/framework.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/framework.dir/build.make CMakeFiles/framework.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/framework.dir/build.make CMakeFiles/framework.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=1,2,3 "Built target framework"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build_vtune/CMakeFiles --progress-num=1,2,3 "Built target framework"
 .PHONY : CMakeFiles/framework.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/framework.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build/CMakeFiles 3
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build_vtune/CMakeFiles 3
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/framework.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build_vtune/CMakeFiles 0
 .PHONY : CMakeFiles/framework.dir/rule
 
 # Convenience name for target.
@@ -108,7 +108,7 @@ framework: CMakeFiles/framework.dir/rule
 # codegen rule for target.
 CMakeFiles/framework.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/framework.dir/build.make CMakeFiles/framework.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=1,2,3 "Finished codegen for target framework"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build_vtune/CMakeFiles --progress-num=1,2,3 "Finished codegen for target framework"
 .PHONY : CMakeFiles/framework.dir/codegen
 
 # clean rule for target.
@@ -123,14 +123,14 @@ CMakeFiles/framework.dir/clean:
 CMakeFiles/student.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/student.dir/build.make CMakeFiles/student.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/student.dir/build.make CMakeFiles/student.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=5 "Built target student"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build_vtune/CMakeFiles --progress-num=5 "Built target student"
 .PHONY : CMakeFiles/student.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/student.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build/CMakeFiles 1
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build_vtune/CMakeFiles 1
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/student.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build_vtune/CMakeFiles 0
 .PHONY : CMakeFiles/student.dir/rule
 
 # Convenience name for target.
@@ -140,7 +140,7 @@ student: CMakeFiles/student.dir/rule
 # codegen rule for target.
 CMakeFiles/student.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/student.dir/build.make CMakeFiles/student.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=5 "Finished codegen for target student"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build_vtune/CMakeFiles --progress-num=5 "Finished codegen for target student"
 .PHONY : CMakeFiles/student.dir/codegen
 
 # clean rule for target.
@@ -152,18 +152,18 @@ CMakeFiles/student.dir/clean:
 # Target rules for target CMakeFiles/lab2.dir
 
 # All Build rule for target.
-CMakeFiles/lab2.dir/all: CMakeFiles/student.dir/all
 CMakeFiles/lab2.dir/all: CMakeFiles/framework.dir/all
+CMakeFiles/lab2.dir/all: CMakeFiles/student.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lab2.dir/build.make CMakeFiles/lab2.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lab2.dir/build.make CMakeFiles/lab2.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=4 "Built target lab2"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build_vtune/CMakeFiles --progress-num=4 "Built target lab2"
 .PHONY : CMakeFiles/lab2.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/lab2.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build/CMakeFiles 5
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build_vtune/CMakeFiles 5
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/lab2.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/h3250106394/lab02/build_vtune/CMakeFiles 0
 .PHONY : CMakeFiles/lab2.dir/rule
 
 # Convenience name for target.
@@ -173,7 +173,7 @@ lab2: CMakeFiles/lab2.dir/rule
 # codegen rule for target.
 CMakeFiles/lab2.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lab2.dir/build.make CMakeFiles/lab2.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=4 "Finished codegen for target lab2"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build_vtune/CMakeFiles --progress-num=4 "Finished codegen for target lab2"
 .PHONY : CMakeFiles/lab2.dir/codegen
 
 # clean rule for target.

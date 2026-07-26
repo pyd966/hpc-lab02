@@ -1,0 +1,58 @@
+-- The C compiler identification is GNU 14.2.0
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test COMPILER_SUPPORTS_SPR
+-- Performing Test COMPILER_SUPPORTS_SPR - Success
+-- Configuring done (11.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/h3250106394/lab02/build_vtune
+[ 80%] Building CXX object CMakeFiles/framework.dir/src/data.cpp.o
+[ 80%] Building CXX object CMakeFiles/framework.dir/main.cpp.o
+[ 80%] Building CXX object CMakeFiles/framework.dir/src/moe_ref.cpp.o
+[ 80%] Building CXX object CMakeFiles/student.dir/student/moe_opt.cpp.o
+[ 80%] Built target framework
+[ 80%] Built target student
+[100%] Linking CXX executable lab2
+[100%] Built target lab2
+===== S1: VTune HPC Performance =====
+vtune: Warning: To profile kernel modules during the session, make sure they are available in the /lib/modules/kernel_version/ location.
+vtune: Error: amplxe-perf:
+Using CPUID GenuineIntel-6-8F-8
+DEBUGINFOD_URLS=
+Compression enabled, disabling build id collection at the end of the session.
+nr_cblocks: 0
+affinity: SYS
+mmap flush: 1
+comp level: 1
+maps__set_modules_path_dir: cannot open /lib/modules/6.12.96+deb13-amd64 dir
+Problems setting modules path maps, continuing anyway...
+Warning:
+kernel.perf_event_paranoid=2, trying to fall back to excluding kernel and hypervisor  samples
+Error:
+Access to performance monitoring and observability operations is limited.
+Consider adjusting /proc/sys/kernel/perf_event_paranoid setting to open
+access to performance monitoring and observability operations for processes
+without CAP_PERFMON, CAP_SYS_PTRACE or CAP_SYS_ADMIN Linux capability.
+More information can be found at 'Perf events and tool security' document:
+https://www.kernel.org/doc/html/latest/admin-guide/perf-security.html
+perf_event_paranoid setting is 2:
+  -1: Allow use of (almost) all events by all users
+      Ignore mlock limit after perf_event_mlock_kb without CAP_IPC_LOCK
+>= 0: Disallow raw and ftrace function tracepoint access
+>= 1: Disallow CPU event access
+>= 2: Disallow kernel profiling
+To make the adjusted perf_event_paranoid setting permanent preserve it
+in /etc/sysctl.conf (e.g. kernel.perf_event_paranoid = <setting>)
+
+vtune: Error: Preliminary validation of the requested events failed.
+vtune: Collection failed.
+vtune: Internal Error

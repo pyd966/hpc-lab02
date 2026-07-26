@@ -1,0 +1,5 @@
+/home/h3250106394/lab02/build_vtune/CMakeFiles/framework.dir
+/home/h3250106394/lab02/build_vtune/CMakeFiles/student.dir
+/home/h3250106394/lab02/build_vtune/CMakeFiles/lab2.dir
+/home/h3250106394/lab02/build_vtune/CMakeFiles/edit_cache.dir
+/home/h3250106394/lab02/build_vtune/CMakeFiles/rebuild_cache.dir

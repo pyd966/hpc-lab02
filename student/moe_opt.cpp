@@ -2,9 +2,14 @@
 
 #include "moe.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <pthread.h>
+#include <sched.h>
+#include <thread>
 
 #if defined(__AVX512F__) && defined(__AVX512VNNI__)
 #include <immintrin.h>
@@ -39,6 +44,7 @@ alignas(64) static int32_t
 alignas(64) static int32_t s1_up_sums[S1_EXPERT_SLOTS * S1_D_FF];
 alignas(64) static int32_t s1_down_sums[S1_EXPERT_SLOTS * S1_D_MODEL];
 static bool s1_preprocessed = false;
+static void start_s1_worker_pool();
 
 static void pack_s1_matrix(const int8_t* src, int output_dim,
                            int reduction_dim, int8_t* packed,
@@ -97,6 +103,7 @@ static void preprocess_s1(MoEWeights& w) {
                        s1_down_sums + (size_t)slot * S1_D_MODEL);
     }
     s1_preprocessed = true;
+    start_s1_worker_pool();
 #endif
 }
 
@@ -423,6 +430,148 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
         _mm512_storeu_ps(out + ob * 16, result);
     }
 }
+
+constexpr int S1_MAX_BACKGROUND_WORKERS = MAX_TOP_K;
+
+struct alignas(64) S1WorkerTask {
+    int slot;
+    float s_gate;
+    float s_up;
+    float s_down;
+    const uint8_t* xq_shifted;
+    float s_x;
+    float* out;
+};
+
+struct alignas(64) S1WorkerCompletion {
+    std::atomic<uint64_t> generation{0};
+};
+
+class S1WorkerPool {
+   public:
+    ~S1WorkerPool() {
+        stop.store(true, std::memory_order_release);
+        generation.fetch_add(1, std::memory_order_release);
+        for (int i = 0; i < worker_count; i++) {
+            if (workers[i].joinable()) workers[i].join();
+        }
+    }
+
+    void start() {
+        if (started) return;
+        started = true;
+
+        int max_threads = S1_MAX_BACKGROUND_WORKERS + 1;
+        if (const char* value = std::getenv("OMP_NUM_THREADS")) {
+            const long configured = std::strtol(value, nullptr, 10);
+            if (configured > 0) max_threads = (int)configured;
+        }
+        worker_count = max_threads - 1;
+        if (worker_count < 0) worker_count = 0;
+        if (worker_count > S1_MAX_BACKGROUND_WORKERS) {
+            worker_count = S1_MAX_BACKGROUND_WORKERS;
+        }
+
+        for (int i = 0; i < worker_count; i++) {
+            workers[i] = std::thread(&S1WorkerPool::worker_loop, this, i);
+        }
+        while (ready.load(std::memory_order_acquire) != worker_count) {
+            _mm_pause();
+        }
+#ifdef _OPENMP
+        pin_to_openmp_places();
+#endif
+    }
+
+    int size() const { return worker_count; }
+
+    void set_task(int worker, int slot, float s_gate, float s_up,
+                  float s_down, const uint8_t* xq_shifted, float s_x,
+                  float* out) {
+        tasks[worker] = {slot, s_gate, s_up, s_down, xq_shifted, s_x, out};
+    }
+
+    uint64_t launch() {
+        const uint64_t current = ++next_generation;
+        generation.store(current, std::memory_order_release);
+        return current;
+    }
+
+    void wait(uint64_t current) const {
+        for (int i = 0; i < worker_count; i++) {
+            while (completed[i].generation.load(std::memory_order_acquire) !=
+                   current) {
+                _mm_pause();
+            }
+        }
+    }
+
+   private:
+#ifdef _OPENMP
+    static void pin_to_place(pthread_t thread, int place) {
+        const int cpu_count = omp_get_place_num_procs(place);
+        if (cpu_count <= 0 || cpu_count > CPU_SETSIZE) return;
+
+        int cpus[CPU_SETSIZE];
+        omp_get_place_proc_ids(place, cpus);
+        cpu_set_t affinity;
+        CPU_ZERO(&affinity);
+        for (int i = 0; i < cpu_count; i++) CPU_SET(cpus[i], &affinity);
+        pthread_setaffinity_np(thread, sizeof(affinity), &affinity);
+    }
+
+    void pin_to_openmp_places() {
+        const int place_count = omp_get_num_places();
+        if (place_count < worker_count + 1) return;
+
+        int main_place = omp_get_place_num();
+        if (main_place < 0) main_place = 0;
+        pin_to_place(pthread_self(), main_place);
+        for (int i = 0; i < worker_count; i++) {
+            const int place = (main_place + i + 1) % place_count;
+            pin_to_place(workers[i].native_handle(), place);
+        }
+    }
+#endif
+
+    void worker_loop(int worker) {
+        uint64_t observed = generation.load(std::memory_order_acquire);
+        ready.fetch_add(1, std::memory_order_release);
+
+        while (!stop.load(std::memory_order_acquire)) {
+            uint64_t current;
+            do {
+                current = generation.load(std::memory_order_acquire);
+                if (stop.load(std::memory_order_relaxed)) return;
+                _mm_pause();
+            } while (current == observed);
+
+            observed = current;
+            const S1WorkerTask task = tasks[worker];
+            s1_expert_ffn(task.slot, task.s_gate, task.s_up, task.s_down,
+                          task.xq_shifted, task.s_x, task.out);
+            completed[worker].generation.store(current,
+                                               std::memory_order_release);
+        }
+    }
+
+    alignas(64) S1WorkerTask tasks[S1_MAX_BACKGROUND_WORKERS];
+    S1WorkerCompletion completed[S1_MAX_BACKGROUND_WORKERS];
+    std::thread workers[S1_MAX_BACKGROUND_WORKERS];
+    alignas(64) std::atomic<uint64_t> generation{0};
+    alignas(64) std::atomic<int> ready{0};
+    std::atomic<bool> stop{false};
+    uint64_t next_generation = 0;
+    int worker_count = 0;
+    bool started = false;
+};
+
+static S1WorkerPool& s1_worker_pool() {
+    static S1WorkerPool pool;
+    return pool;
+}
+
+static void start_s1_worker_pool() { s1_worker_pool().start(); }
 #endif
 
 static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
@@ -521,25 +670,24 @@ static void moe_forward_optimized_s1(const float* x, const MoEWeights& w,
     alignas(64) uint8_t xq_shifted[S1_D_MODEL];
     const float s_x = quantize_s1_u8(x, S1_D_MODEL, xq_shifted);
     alignas(64) float expert_out[MAX_TOP_K + 1][S1_D_MODEL];
-    const int expert_tasks = w.top_k + 1;
-    int worker_count = 1;
-#ifdef _OPENMP
-    worker_count = omp_get_max_threads();
-    if (worker_count > expert_tasks) worker_count = expert_tasks;
-#endif
-
-#pragma omp parallel for schedule(static, 1) num_threads(worker_count)
-    for (int task = 0; task < expert_tasks; task++) {
-        if (task == 0) {
-            s1_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
-                          s_x, expert_out[0]);
-        } else {
-            const int expert = topk_idx[task - 1];
-            s1_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
-                          w.s_down[expert], xq_shifted, s_x,
-                          expert_out[task]);
-        }
+    S1WorkerPool& pool = s1_worker_pool();
+    const int background_workers = pool.size();
+    for (int worker = 0; worker < background_workers; worker++) {
+        const int expert = topk_idx[worker];
+        pool.set_task(worker, expert + 1, w.s_gate[expert], w.s_up[expert],
+                      w.s_down[expert], xq_shifted, s_x,
+                      expert_out[worker + 1]);
     }
+    const uint64_t generation = pool.launch();
+
+    s1_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted, s_x,
+                  expert_out[0]);
+    for (int k = background_workers; k < w.top_k; k++) {
+        const int expert = topk_idx[k];
+        s1_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
+                      w.s_down[expert], xq_shifted, s_x, expert_out[k + 1]);
+    }
+    pool.wait(generation);
 
     for (int d = 0; d < S1_D_MODEL; d += 16) {
         _mm512_storeu_ps(
