@@ -35,9 +35,13 @@ constexpr int S2_D_MODEL = 1024;
 constexpr int S2_D_FF = 512;
 constexpr int S2_NUM_EXPERTS = 16;
 constexpr int S2_EXPERT_SLOTS = S2_NUM_EXPERTS + 1;
-constexpr int S2_GATE_TILE_BLOCKS = 8;
-constexpr int S2_DOWN_TILE_BLOCKS = 16;
+constexpr int S2_ACTIVE_TASKS = MAX_TOP_K + 1;
+constexpr int S2_THREAD_SHARDS = 16;
+constexpr int S2_GATE_BLOCKS_PER_SHARD = (S2_D_FF / 16) / S2_THREAD_SHARDS;
+constexpr int S2_DOWN_BLOCKS_PER_SHARD =
+    (S2_D_MODEL / 16) / S2_THREAD_SHARDS;
 constexpr size_t S2_MATRIX_SIZE = (size_t)S2_D_MODEL * S2_D_FF;
+constexpr size_t S2_SHARD_MATRIX_SIZE = S2_MATRIX_SIZE / S2_THREAD_SHARDS;
 
 alignas(64) static float s1_router_transposed[S1_D_MODEL * S1_NUM_EXPERTS];
 alignas(64) static int8_t
@@ -52,17 +56,21 @@ alignas(64) static int32_t s1_up_sums[S1_EXPERT_SLOTS * S1_D_FF];
 alignas(64) static int32_t s1_down_sums[S1_EXPERT_SLOTS * S1_D_MODEL];
 static bool s1_preprocessed = false;
 static void start_s1_worker_pool();
+static void start_s2_worker_pool();
 alignas(64) static float s2_router_transposed[S2_D_MODEL * S2_NUM_EXPERTS];
-alignas(64) static int8_t
-    s2_gate_packed[S2_EXPERT_SLOTS * S2_MATRIX_SIZE];
-alignas(64) static int8_t
-    s2_up_packed[S2_EXPERT_SLOTS * S2_MATRIX_SIZE];
-alignas(64) static int8_t
-    s2_down_packed[S2_EXPERT_SLOTS * S2_MATRIX_SIZE];
-alignas(64) static int32_t
-    s2_gate_sums[S2_EXPERT_SLOTS * S2_D_FF];
-alignas(64) static int32_t s2_up_sums[S2_EXPERT_SLOTS * S2_D_FF];
-alignas(64) static int32_t s2_down_sums[S2_EXPERT_SLOTS * S2_D_MODEL];
+struct alignas(64) S2ExpertShard {
+    alignas(64) int8_t gate[S2_SHARD_MATRIX_SIZE];
+    alignas(64) int8_t up[S2_SHARD_MATRIX_SIZE];
+    alignas(64) int8_t down[S2_SHARD_MATRIX_SIZE];
+    alignas(64) int32_t gate_sums[S2_GATE_BLOCKS_PER_SHARD * 16];
+    alignas(64) int32_t up_sums[S2_GATE_BLOCKS_PER_SHARD * 16];
+    alignas(64) int32_t down_sums[S2_DOWN_BLOCKS_PER_SHARD * 16];
+};
+
+static_assert(sizeof(S2ExpertShard) * S2_EXPERT_SLOTS < 2 * 1024 * 1024,
+              "one thread's S2 weights must fit in its private L2");
+alignas(64) static S2ExpertShard
+    s2_expert_shards[S2_THREAD_SHARDS][S2_EXPERT_SLOTS];
 static bool s2_preprocessed = false;
 
 static void pack_s1_matrix(const int8_t* src, int output_dim,
@@ -90,30 +98,46 @@ static void pack_s1_matrix(const int8_t* src, int output_dim,
     }
 }
 
+enum class S2Projection { Gate, Up, Down };
+
 static void pack_s2_matrix(const int8_t* src, int output_dim,
-                           int reduction_dim, int tile_blocks, int8_t* packed,
-                           int32_t* row_sums) {
+                           int reduction_dim, int slot,
+                           S2Projection projection) {
     const int output_blocks = output_dim / 16;
     const int reduction_blocks = reduction_dim / 4;
-    const int tile_count = output_blocks / tile_blocks;
+    const int blocks_per_shard = output_blocks / S2_THREAD_SHARDS;
 
-    for (int o = 0; o < output_dim; o++) {
-        int32_t sum = 0;
-        for (int r = 0; r < reduction_dim; r++) {
-            sum += src[(size_t)o * reduction_dim + r];
+    for (int thread = 0; thread < S2_THREAD_SHARDS; thread++) {
+        S2ExpertShard& shard = s2_expert_shards[thread][slot];
+        int8_t* packed;
+        int32_t* row_sums;
+        if (projection == S2Projection::Gate) {
+            packed = shard.gate;
+            row_sums = shard.gate_sums;
+        } else if (projection == S2Projection::Up) {
+            packed = shard.up;
+            row_sums = shard.up_sums;
+        } else {
+            packed = shard.down;
+            row_sums = shard.down_sums;
         }
-        row_sums[o] = sum;
-    }
 
-    for (int tile = 0; tile < tile_count; tile++) {
+        const int first_output = thread * blocks_per_shard * 16;
+        for (int local_o = 0; local_o < blocks_per_shard * 16; local_o++) {
+            const int o = first_output + local_o;
+            int32_t sum = 0;
+            for (int r = 0; r < reduction_dim; r++) {
+                sum += src[(size_t)o * reduction_dim + r];
+            }
+            row_sums[local_o] = sum;
+        }
+
         for (int rb = 0; rb < reduction_blocks; rb++) {
-            for (int local_ob = 0; local_ob < tile_blocks; local_ob++) {
-                const int ob = tile * tile_blocks + local_ob;
-                int8_t* block =
-                    packed +
-                    ((size_t)(tile * reduction_blocks + rb) * tile_blocks +
-                     local_ob) *
-                        64;
+            for (int local_ob = 0; local_ob < blocks_per_shard; local_ob++) {
+                const int ob = thread * blocks_per_shard + local_ob;
+                int8_t* block = packed +
+                                ((size_t)rb * blocks_per_shard + local_ob) *
+                                    64;
                 for (int lane = 0; lane < 16; lane++) {
                     const int8_t* row =
                         src + (size_t)(ob * 16 + lane) * reduction_dim + rb * 4;
@@ -169,31 +193,23 @@ static void preprocess_s2(MoEWeights& w) {
         }
     }
 
-    pack_s2_matrix(w.sh_gate, S2_D_FF, S2_D_MODEL, S2_GATE_TILE_BLOCKS,
-                   s2_gate_packed, s2_gate_sums);
-    pack_s2_matrix(w.sh_up, S2_D_FF, S2_D_MODEL, S2_GATE_TILE_BLOCKS,
-                   s2_up_packed, s2_up_sums);
-    pack_s2_matrix(w.sh_down, S2_D_MODEL, S2_D_FF, S2_DOWN_TILE_BLOCKS,
-                   s2_down_packed, s2_down_sums);
+    pack_s2_matrix(w.sh_gate, S2_D_FF, S2_D_MODEL, 0,
+                   S2Projection::Gate);
+    pack_s2_matrix(w.sh_up, S2_D_FF, S2_D_MODEL, 0, S2Projection::Up);
+    pack_s2_matrix(w.sh_down, S2_D_MODEL, S2_D_FF, 0,
+                   S2Projection::Down);
 
     for (int e = 0; e < S2_NUM_EXPERTS; e++) {
         const int slot = e + 1;
-        pack_s2_matrix(
-            w.w_gate + (size_t)e * S2_MATRIX_SIZE, S2_D_FF, S2_D_MODEL,
-            S2_GATE_TILE_BLOCKS,
-            s2_gate_packed + (size_t)slot * S2_MATRIX_SIZE,
-            s2_gate_sums + (size_t)slot * S2_D_FF);
+        pack_s2_matrix(w.w_gate + (size_t)e * S2_MATRIX_SIZE, S2_D_FF,
+                       S2_D_MODEL, slot, S2Projection::Gate);
         pack_s2_matrix(w.w_up + (size_t)e * S2_MATRIX_SIZE, S2_D_FF,
-                       S2_D_MODEL, S2_GATE_TILE_BLOCKS,
-                       s2_up_packed + (size_t)slot * S2_MATRIX_SIZE,
-                       s2_up_sums + (size_t)slot * S2_D_FF);
-        pack_s2_matrix(
-            w.w_down + (size_t)e * S2_MATRIX_SIZE, S2_D_MODEL, S2_D_FF,
-            S2_DOWN_TILE_BLOCKS,
-            s2_down_packed + (size_t)slot * S2_MATRIX_SIZE,
-            s2_down_sums + (size_t)slot * S2_D_MODEL);
+                       S2_D_MODEL, slot, S2Projection::Up);
+        pack_s2_matrix(w.w_down + (size_t)e * S2_MATRIX_SIZE, S2_D_MODEL,
+                       S2_D_FF, slot, S2Projection::Down);
     }
     s2_preprocessed = true;
+    start_s2_worker_pool();
 #endif
 }
 
@@ -528,18 +544,16 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
     }
 }
 
-__attribute__((noinline)) static void s2_gate_up_dot_tile(
-    const int8_t* gate, const int8_t* up, const int32_t* gate_sums,
-    const int32_t* up_sums, const uint8_t* xq_shifted, int32_t* gate_out,
-    int32_t* up_out) {
-    __m512i acc_gate[S2_GATE_TILE_BLOCKS];
-    __m512i acc_up[S2_GATE_TILE_BLOCKS];
-#pragma GCC unroll 8
-    for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS; local_ob++) {
-        acc_gate[local_ob] =
-            s1_corrected_accumulator(gate_sums + local_ob * 16);
-        acc_up[local_ob] =
-            s1_corrected_accumulator(up_sums + local_ob * 16);
+static inline void s2_gate_up_shard(
+    const S2ExpertShard& shard, int shard_index, float s_gate, float s_up,
+    const uint8_t* xq_shifted, float s_x, float* hidden) {
+    __m512i acc_gate[S2_GATE_BLOCKS_PER_SHARD];
+    __m512i acc_up[S2_GATE_BLOCKS_PER_SHARD];
+#pragma GCC unroll 2
+    for (int ob = 0; ob < S2_GATE_BLOCKS_PER_SHARD; ob++) {
+        acc_gate[ob] =
+            s1_corrected_accumulator(shard.gate_sums + ob * 16);
+        acc_up[ob] = s1_corrected_accumulator(shard.up_sums + ob * 16);
     }
 
     constexpr int reduction_blocks = S2_D_MODEL / 4;
@@ -547,40 +561,46 @@ __attribute__((noinline)) static void s2_gate_up_dot_tile(
         uint32_t activation4;
         std::memcpy(&activation4, xq_shifted + rb * 4, 4);
         const __m512i activation = _mm512_set1_epi32((int)activation4);
-#pragma GCC unroll 4
-        for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS;
-             local_ob += 2) {
-            const size_t offset0 =
-                ((size_t)rb * S2_GATE_TILE_BLOCKS + local_ob) * 64;
-            const size_t offset1 = offset0 + 64;
-            acc_gate[local_ob] = s2_dpbusd_mem(
-                acc_gate[local_ob], activation, gate + offset0);
-            acc_up[local_ob] = s2_dpbusd_mem(
-                acc_up[local_ob], activation, up + offset0);
-            acc_gate[local_ob + 1] = s2_dpbusd_mem(
-                acc_gate[local_ob + 1], activation, gate + offset1);
-            acc_up[local_ob + 1] = s2_dpbusd_mem(
-                acc_up[local_ob + 1], activation, up + offset1);
-        }
+        const size_t offset =
+            (size_t)rb * S2_GATE_BLOCKS_PER_SHARD * 64;
+        acc_gate[0] =
+            s2_dpbusd_mem(acc_gate[0], activation, shard.gate + offset);
+        acc_up[0] =
+            s2_dpbusd_mem(acc_up[0], activation, shard.up + offset);
+        acc_gate[1] =
+            s2_dpbusd_mem(acc_gate[1], activation, shard.gate + offset + 64);
+        acc_up[1] =
+            s2_dpbusd_mem(acc_up[1], activation, shard.up + offset + 64);
     }
 
-#pragma GCC unroll 8
-    for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS; local_ob++) {
-        _mm512_store_si512((__m512i*)(gate_out + local_ob * 16),
-                           acc_gate[local_ob]);
-        _mm512_store_si512((__m512i*)(up_out + local_ob * 16),
-                           acc_up[local_ob]);
+    const __m512 gate_scale = _mm512_set1_ps(s_x * s_gate);
+    const __m512 up_scale = _mm512_set1_ps(s_x * s_up);
+    const __m512 one = _mm512_set1_ps(1.0f);
+    const int first_output =
+        shard_index * S2_GATE_BLOCKS_PER_SHARD * 16;
+#pragma GCC unroll 2
+    for (int ob = 0; ob < S2_GATE_BLOCKS_PER_SHARD; ob++) {
+        const __m512 vg =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(acc_gate[ob]), gate_scale);
+        const __m512 vu =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(acc_up[ob]), up_scale);
+        const __m512 denominator = _mm512_add_ps(
+            one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
+        const __m512 silu =
+            _mm512_mul_ps(vg, reciprocal512_ps(denominator));
+        _mm512_store_ps(hidden + first_output + ob * 16,
+                        _mm512_mul_ps(silu, vu));
     }
 }
 
-__attribute__((noinline)) static void s2_down_dot_tile(
-    const int8_t* down, const int32_t* down_sums,
-    const uint8_t* hq_shifted, int32_t* down_out) {
-    __m512i down_acc[S2_DOWN_TILE_BLOCKS];
-#pragma GCC unroll 16
-    for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS; local_ob++) {
-        down_acc[local_ob] =
-            s1_corrected_accumulator(down_sums + local_ob * 16);
+static inline void s2_down_shard(
+    const S2ExpertShard& shard, int shard_index, float s_down,
+    const uint8_t* hq_shifted, float s_h, float mixture, bool shared,
+    const float* x, float* y) {
+    __m512i acc[S2_DOWN_BLOCKS_PER_SHARD];
+#pragma GCC unroll 4
+    for (int ob = 0; ob < S2_DOWN_BLOCKS_PER_SHARD; ob++) {
+        acc[ob] = s1_corrected_accumulator(shard.down_sums + ob * 16);
     }
 
     constexpr int reduction_blocks = S2_D_FF / 4;
@@ -588,103 +608,402 @@ __attribute__((noinline)) static void s2_down_dot_tile(
         uint32_t activation4;
         std::memcpy(&activation4, hq_shifted + rb * 4, 4);
         const __m512i activation = _mm512_set1_epi32((int)activation4);
+        const size_t offset =
+            (size_t)rb * S2_DOWN_BLOCKS_PER_SHARD * 64;
+        acc[0] = s2_dpbusd_mem(acc[0], activation, shard.down + offset);
+        acc[1] =
+            s2_dpbusd_mem(acc[1], activation, shard.down + offset + 64);
+        acc[2] =
+            s2_dpbusd_mem(acc[2], activation, shard.down + offset + 128);
+        acc[3] =
+            s2_dpbusd_mem(acc[3], activation, shard.down + offset + 192);
+    }
+
+    const __m512 output_scale = _mm512_set1_ps(s_h * s_down);
+    const __m512 mixture_vector = _mm512_set1_ps(mixture);
+    const int first_output =
+        shard_index * S2_DOWN_BLOCKS_PER_SHARD * 16;
 #pragma GCC unroll 4
-        for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS;
-             local_ob += 4) {
-            const size_t offset0 =
-                ((size_t)rb * S2_DOWN_TILE_BLOCKS + local_ob) * 64;
-            down_acc[local_ob] = s2_dpbusd_mem(
-                down_acc[local_ob], activation, down + offset0);
-            down_acc[local_ob + 1] = s2_dpbusd_mem(
-                down_acc[local_ob + 1], activation, down + offset0 + 64);
-            down_acc[local_ob + 2] = s2_dpbusd_mem(
-                down_acc[local_ob + 2], activation, down + offset0 + 128);
-            down_acc[local_ob + 3] = s2_dpbusd_mem(
-                down_acc[local_ob + 3], activation, down + offset0 + 192);
+    for (int ob = 0; ob < S2_DOWN_BLOCKS_PER_SHARD; ob++) {
+        const int output = first_output + ob * 16;
+        const __m512 result =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(acc[ob]), output_scale);
+        if (shared) {
+            _mm512_storeu_ps(
+                y + output,
+                _mm512_add_ps(_mm512_loadu_ps(x + output), result));
+        } else {
+            _mm512_storeu_ps(
+                y + output,
+                _mm512_fmadd_ps(mixture_vector, result,
+                                _mm512_loadu_ps(y + output)));
+        }
+    }
+}
+static inline void s2_gate_up_shard_pair(
+    const S2ExpertShard& first, const S2ExpertShard& second, int shard_index,
+    float first_s_gate, float first_s_up, float second_s_gate,
+    float second_s_up, const uint8_t* xq_shifted, float s_x,
+    float* first_hidden, float* second_hidden) {
+    const S2ExpertShard* shards[2] = {&first, &second};
+    __m512i acc_gate[2][S2_GATE_BLOCKS_PER_SHARD];
+    __m512i acc_up[2][S2_GATE_BLOCKS_PER_SHARD];
+#pragma GCC unroll 2
+    for (int task = 0; task < 2; task++) {
+#pragma GCC unroll 2
+        for (int ob = 0; ob < S2_GATE_BLOCKS_PER_SHARD; ob++) {
+            acc_gate[task][ob] =
+                s1_corrected_accumulator(shards[task]->gate_sums + ob * 16);
+            acc_up[task][ob] =
+                s1_corrected_accumulator(shards[task]->up_sums + ob * 16);
         }
     }
 
-#pragma GCC unroll 16
-    for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS; local_ob++) {
-        _mm512_store_si512((__m512i*)(down_out + local_ob * 16),
-                           down_acc[local_ob]);
+    constexpr int reduction_blocks = S2_D_MODEL / 4;
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, xq_shifted + rb * 4, 4);
+        const __m512i activation = _mm512_set1_epi32((int)activation4);
+        const size_t offset =
+            (size_t)rb * S2_GATE_BLOCKS_PER_SHARD * 64;
+#pragma GCC unroll 2
+        for (int task = 0; task < 2; task++) {
+            acc_gate[task][0] = s2_dpbusd_mem(
+                acc_gate[task][0], activation, shards[task]->gate + offset);
+            acc_up[task][0] = s2_dpbusd_mem(
+                acc_up[task][0], activation, shards[task]->up + offset);
+            acc_gate[task][1] =
+                s2_dpbusd_mem(acc_gate[task][1], activation,
+                              shards[task]->gate + offset + 64);
+            acc_up[task][1] =
+                s2_dpbusd_mem(acc_up[task][1], activation,
+                              shards[task]->up + offset + 64);
+        }
     }
-}
 
-static void s2_expert_ffn(int slot, float s_gate, float s_up, float s_down,
-                          const uint8_t* xq_shifted, float s_x, float* out) {
-    const int8_t* gate =
-        s2_gate_packed + (size_t)slot * S2_MATRIX_SIZE;
-    const int8_t* up = s2_up_packed + (size_t)slot * S2_MATRIX_SIZE;
-    const int8_t* down =
-        s2_down_packed + (size_t)slot * S2_MATRIX_SIZE;
-    const int32_t* gate_sums = s2_gate_sums + (size_t)slot * S2_D_FF;
-    const int32_t* up_sums = s2_up_sums + (size_t)slot * S2_D_FF;
-    const int32_t* down_sums =
-        s2_down_sums + (size_t)slot * S2_D_MODEL;
-
-    constexpr int gate_reduction_blocks = S2_D_MODEL / 4;
-    constexpr int gate_output_blocks = S2_D_FF / 16;
-    constexpr int gate_tile_count =
-        gate_output_blocks / S2_GATE_TILE_BLOCKS;
-    alignas(64) float hidden[S2_D_FF];
-    const __m512 gate_scale = _mm512_set1_ps(s_x * s_gate);
-    const __m512 up_scale = _mm512_set1_ps(s_x * s_up);
+    const float gate_scales[2] = {first_s_gate, second_s_gate};
+    const float up_scales[2] = {first_s_up, second_s_up};
+    float* hidden[2] = {first_hidden, second_hidden};
     const __m512 one = _mm512_set1_ps(1.0f);
-
-    for (int tile = 0; tile < gate_tile_count; tile++) {
-        alignas(64) __m512i acc_gate[S2_GATE_TILE_BLOCKS];
-        alignas(64) __m512i acc_up[S2_GATE_TILE_BLOCKS];
-        const size_t tile_base =
-            (size_t)tile * gate_reduction_blocks * S2_GATE_TILE_BLOCKS * 64;
-        s2_gate_up_dot_tile(
-            gate + tile_base, up + tile_base,
-            gate_sums + tile * S2_GATE_TILE_BLOCKS * 16,
-            up_sums + tile * S2_GATE_TILE_BLOCKS * 16, xq_shifted,
-            (int32_t*)acc_gate, (int32_t*)acc_up);
-
-#pragma GCC unroll 8
-        for (int local_ob = 0; local_ob < S2_GATE_TILE_BLOCKS; local_ob++) {
-            const int global_ob = tile * S2_GATE_TILE_BLOCKS + local_ob;
+    const int first_output =
+        shard_index * S2_GATE_BLOCKS_PER_SHARD * 16;
+#pragma GCC unroll 2
+    for (int task = 0; task < 2; task++) {
+        const __m512 gate_scale = _mm512_set1_ps(s_x * gate_scales[task]);
+        const __m512 up_scale = _mm512_set1_ps(s_x * up_scales[task]);
+#pragma GCC unroll 2
+        for (int ob = 0; ob < S2_GATE_BLOCKS_PER_SHARD; ob++) {
             const __m512 vg = _mm512_mul_ps(
-                _mm512_cvtepi32_ps(acc_gate[local_ob]), gate_scale);
+                _mm512_cvtepi32_ps(acc_gate[task][ob]), gate_scale);
             const __m512 vu = _mm512_mul_ps(
-                _mm512_cvtepi32_ps(acc_up[local_ob]), up_scale);
+                _mm512_cvtepi32_ps(acc_up[task][ob]), up_scale);
             const __m512 denominator = _mm512_add_ps(
                 one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
             const __m512 silu =
                 _mm512_mul_ps(vg, reciprocal512_ps(denominator));
-            _mm512_store_ps(hidden + global_ob * 16,
+            _mm512_store_ps(hidden[task] + first_output + ob * 16,
                             _mm512_mul_ps(silu, vu));
         }
     }
+}
 
-    alignas(64) uint8_t hq_shifted[S2_D_FF];
-    const float s_h = quantize_s1_u8(hidden, S2_D_FF, hq_shifted);
-    constexpr int down_reduction_blocks = S2_D_FF / 4;
-    constexpr int down_output_blocks = S2_D_MODEL / 16;
-    constexpr int down_tile_count =
-        down_output_blocks / S2_DOWN_TILE_BLOCKS;
-    const __m512 output_scale = _mm512_set1_ps(s_h * s_down);
-
-    for (int tile = 0; tile < down_tile_count; tile++) {
-        alignas(64) __m512i down_acc[S2_DOWN_TILE_BLOCKS];
-        const size_t tile_base =
-            (size_t)tile * down_reduction_blocks * S2_DOWN_TILE_BLOCKS * 64;
-        s2_down_dot_tile(
-            down + tile_base,
-            down_sums + tile * S2_DOWN_TILE_BLOCKS * 16, hq_shifted,
-            (int32_t*)down_acc);
-
-#pragma GCC unroll 16
-        for (int local_ob = 0; local_ob < S2_DOWN_TILE_BLOCKS; local_ob++) {
-            const int global_ob = tile * S2_DOWN_TILE_BLOCKS + local_ob;
-            const __m512 result = _mm512_mul_ps(
-                _mm512_cvtepi32_ps(down_acc[local_ob]), output_scale);
-            _mm512_storeu_ps(out + global_ob * 16, result);
+static inline void s2_down_shard_pair(
+    const S2ExpertShard& first, const S2ExpertShard& second, int shard_index,
+    float first_s_down, float second_s_down,
+    const uint8_t* first_hq_shifted, const uint8_t* second_hq_shifted,
+    float first_s_h, float second_s_h, float first_mixture,
+    float second_mixture, bool first_shared, const float* x, float* y) {
+    const S2ExpertShard* shards[2] = {&first, &second};
+    const uint8_t* hq_shifted[2] = {first_hq_shifted, second_hq_shifted};
+    __m512i acc[2][S2_DOWN_BLOCKS_PER_SHARD];
+#pragma GCC unroll 2
+    for (int task = 0; task < 2; task++) {
+#pragma GCC unroll 4
+        for (int ob = 0; ob < S2_DOWN_BLOCKS_PER_SHARD; ob++) {
+            acc[task][ob] =
+                s1_corrected_accumulator(shards[task]->down_sums + ob * 16);
         }
     }
+
+    constexpr int reduction_blocks = S2_D_FF / 4;
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        const size_t offset =
+            (size_t)rb * S2_DOWN_BLOCKS_PER_SHARD * 64;
+#pragma GCC unroll 2
+        for (int task = 0; task < 2; task++) {
+            uint32_t activation4;
+            std::memcpy(&activation4, hq_shifted[task] + rb * 4, 4);
+            const __m512i activation = _mm512_set1_epi32((int)activation4);
+            acc[task][0] = s2_dpbusd_mem(
+                acc[task][0], activation, shards[task]->down + offset);
+            acc[task][1] =
+                s2_dpbusd_mem(acc[task][1], activation,
+                              shards[task]->down + offset + 64);
+            acc[task][2] =
+                s2_dpbusd_mem(acc[task][2], activation,
+                              shards[task]->down + offset + 128);
+            acc[task][3] =
+                s2_dpbusd_mem(acc[task][3], activation,
+                              shards[task]->down + offset + 192);
+        }
+    }
+
+    const __m512 first_output_scale =
+        _mm512_set1_ps(first_s_h * first_s_down);
+    const __m512 second_output_scale =
+        _mm512_set1_ps(second_s_h * second_s_down);
+    const __m512 first_mixture_vector = _mm512_set1_ps(first_mixture);
+    const __m512 second_mixture_vector = _mm512_set1_ps(second_mixture);
+    const int first_output =
+        shard_index * S2_DOWN_BLOCKS_PER_SHARD * 16;
+#pragma GCC unroll 4
+    for (int ob = 0; ob < S2_DOWN_BLOCKS_PER_SHARD; ob++) {
+        const int output = first_output + ob * 16;
+        const __m512 first_result =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(acc[0][ob]), first_output_scale);
+        if (first_shared) {
+            _mm512_storeu_ps(
+                y + output,
+                _mm512_add_ps(_mm512_loadu_ps(x + output), first_result));
+        } else {
+            _mm512_storeu_ps(
+                y + output,
+                _mm512_fmadd_ps(first_mixture_vector, first_result,
+                                _mm512_loadu_ps(y + output)));
+        }
+
+        const __m512 second_result = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(acc[1][ob]), second_output_scale);
+        _mm512_storeu_ps(
+            y + output,
+            _mm512_fmadd_ps(second_mixture_vector, second_result,
+                            _mm512_loadu_ps(y + output)));
+    }
 }
+
+struct alignas(64) S2TaskReady {
+    std::atomic<int> value{0};
+};
+
+struct S2WorkContext {
+    const uint8_t* xq_shifted;
+    float s_x;
+    const int* slots;
+    const float* gate_scales;
+    const float* up_scales;
+    const float* down_scales;
+    const float* mixtures;
+    float (*hidden)[S2_D_FF];
+    uint8_t (*hq_shifted)[S2_D_FF];
+    float (*hidden_scale)[16];
+    S2TaskReady* task_ready;
+    const float* x;
+    float* y;
+    alignas(64) std::atomic<int> gate_arrived{0};
+    alignas(64) std::atomic<int> down_arrived{0};
+};
+
+static void s2_execute_worker(int thread, int team_size,
+                              S2WorkContext& work) {
+    for (int shard_index = thread; shard_index < S2_THREAD_SHARDS;
+         shard_index += team_size) {
+        int task = 0;
+        for (; task + 1 < S2_ACTIVE_TASKS; task += 2) {
+            const S2ExpertShard& first =
+                s2_expert_shards[shard_index][work.slots[task]];
+            const S2ExpertShard& second =
+                s2_expert_shards[shard_index][work.slots[task + 1]];
+            s2_gate_up_shard_pair(
+                first, second, shard_index, work.gate_scales[task],
+                work.up_scales[task], work.gate_scales[task + 1],
+                work.up_scales[task + 1], work.xq_shifted, work.s_x,
+                work.hidden[task], work.hidden[task + 1]);
+        }
+        if (task < S2_ACTIVE_TASKS) {
+            const S2ExpertShard& shard =
+                s2_expert_shards[shard_index][work.slots[task]];
+            s2_gate_up_shard(
+                shard, shard_index, work.gate_scales[task],
+                work.up_scales[task], work.xq_shifted, work.s_x,
+                work.hidden[task]);
+        }
+    }
+
+    work.gate_arrived.fetch_add(1, std::memory_order_acq_rel);
+    while (work.gate_arrived.load(std::memory_order_acquire) != team_size) {
+        _mm_pause();
+    }
+
+    for (int task = thread; task < S2_ACTIVE_TASKS; task += team_size) {
+        work.hidden_scale[task][0] = quantize_s1_u8(
+            work.hidden[task], S2_D_FF, work.hq_shifted[task]);
+        work.task_ready[task].value.store(1, std::memory_order_release);
+    }
+
+    int task = 0;
+    for (; task + 1 < S2_ACTIVE_TASKS; task += 2) {
+        while (work.task_ready[task].value.load(
+                   std::memory_order_acquire) == 0) {
+            _mm_pause();
+        }
+        while (work.task_ready[task + 1].value.load(
+                   std::memory_order_acquire) == 0) {
+            _mm_pause();
+        }
+        for (int shard_index = thread; shard_index < S2_THREAD_SHARDS;
+             shard_index += team_size) {
+            const S2ExpertShard& first =
+                s2_expert_shards[shard_index][work.slots[task]];
+            const S2ExpertShard& second =
+                s2_expert_shards[shard_index][work.slots[task + 1]];
+            s2_down_shard_pair(
+                first, second, shard_index, work.down_scales[task],
+                work.down_scales[task + 1], work.hq_shifted[task],
+                work.hq_shifted[task + 1], work.hidden_scale[task][0],
+                work.hidden_scale[task + 1][0], work.mixtures[task],
+                work.mixtures[task + 1], task == 0, work.x, work.y);
+        }
+    }
+    if (task < S2_ACTIVE_TASKS) {
+        while (work.task_ready[task].value.load(
+                   std::memory_order_acquire) == 0) {
+            _mm_pause();
+        }
+        for (int shard_index = thread; shard_index < S2_THREAD_SHARDS;
+             shard_index += team_size) {
+            const S2ExpertShard& shard =
+                s2_expert_shards[shard_index][work.slots[task]];
+            s2_down_shard(
+                shard, shard_index, work.down_scales[task],
+                work.hq_shifted[task], work.hidden_scale[task][0],
+                work.mixtures[task], task == 0, work.x, work.y);
+        }
+    }
+
+    work.down_arrived.fetch_add(1, std::memory_order_acq_rel);
+}
+
+class S2WorkerPool {
+   public:
+    ~S2WorkerPool() {
+        stop.store(true, std::memory_order_release);
+        generation.fetch_add(1, std::memory_order_release);
+        for (int i = 0; i < worker_count; i++) {
+            if (workers[i].joinable()) workers[i].join();
+        }
+    }
+
+    void start() {
+        if (started) return;
+        started = true;
+
+        team_size = S2_THREAD_SHARDS;
+#ifdef _OPENMP
+        const int max_threads = omp_get_max_threads();
+        if (team_size > max_threads) team_size = max_threads;
+        const int core_places = omp_get_num_places();
+        if (core_places > 0 && team_size > core_places) {
+            team_size = core_places;
+        }
+#else
+        if (const char* value = std::getenv("OMP_NUM_THREADS")) {
+            const long configured = std::strtol(value, nullptr, 10);
+            if (configured > 0 && team_size > configured) {
+                team_size = (int)configured;
+            }
+        }
+#endif
+        if (team_size < 1) team_size = 1;
+        worker_count = team_size - 1;
+
+        for (int i = 0; i < worker_count; i++) {
+            workers[i] = std::thread(&S2WorkerPool::worker_loop, this, i + 1);
+        }
+        while (ready.load(std::memory_order_acquire) != worker_count) {
+            _mm_pause();
+        }
+#ifdef _OPENMP
+        pin_to_openmp_places();
+#endif
+    }
+
+    void run(S2WorkContext& work) {
+        work.gate_arrived.store(0, std::memory_order_relaxed);
+        work.down_arrived.store(0, std::memory_order_relaxed);
+        for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+            work.task_ready[task].value.store(0, std::memory_order_relaxed);
+        }
+
+        context.store(&work, std::memory_order_relaxed);
+        generation.fetch_add(1, std::memory_order_release);
+        s2_execute_worker(0, team_size, work);
+        while (work.down_arrived.load(std::memory_order_acquire) != team_size) {
+            _mm_pause();
+        }
+    }
+
+   private:
+#ifdef _OPENMP
+    static void pin_to_place(pthread_t thread, int place) {
+        const int cpu_count = omp_get_place_num_procs(place);
+        if (cpu_count <= 0 || cpu_count > CPU_SETSIZE) return;
+
+        int cpus[CPU_SETSIZE];
+        omp_get_place_proc_ids(place, cpus);
+        cpu_set_t affinity;
+        CPU_ZERO(&affinity);
+        for (int i = 0; i < cpu_count; i++) CPU_SET(cpus[i], &affinity);
+        pthread_setaffinity_np(thread, sizeof(affinity), &affinity);
+    }
+
+    void pin_to_openmp_places() {
+        const int place_count = omp_get_num_places();
+        if (place_count < team_size) return;
+
+        int main_place = omp_get_place_num();
+        if (main_place < 0) main_place = 0;
+        pin_to_place(pthread_self(), main_place);
+        for (int i = 0; i < worker_count; i++) {
+            const int place = (main_place + i + 1) % place_count;
+            pin_to_place(workers[i].native_handle(), place);
+        }
+    }
+#endif
+
+    void worker_loop(int thread) {
+        uint64_t observed = generation.load(std::memory_order_acquire);
+        ready.fetch_add(1, std::memory_order_release);
+
+        while (!stop.load(std::memory_order_acquire)) {
+            uint64_t current;
+            do {
+                current = generation.load(std::memory_order_acquire);
+                if (stop.load(std::memory_order_relaxed)) return;
+                _mm_pause();
+            } while (current == observed);
+
+            observed = current;
+            S2WorkContext* work = context.load(std::memory_order_relaxed);
+            s2_execute_worker(thread, team_size, *work);
+        }
+    }
+
+    std::thread workers[S2_THREAD_SHARDS - 1];
+    alignas(64) std::atomic<S2WorkContext*> context{nullptr};
+    alignas(64) std::atomic<uint64_t> generation{0};
+    alignas(64) std::atomic<int> ready{0};
+    std::atomic<bool> stop{false};
+    int team_size = 1;
+    int worker_count = 0;
+    bool started = false;
+};
+
+static S2WorkerPool& s2_worker_pool() {
+    static S2WorkerPool pool;
+    return pool;
+}
+
+static void start_s2_worker_pool() { s2_worker_pool().start(); }
 
 constexpr int S1_MAX_BACKGROUND_WORKERS = MAX_TOP_K;
 
@@ -1034,38 +1353,41 @@ static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
 
     alignas(64) uint8_t xq_shifted[S2_D_MODEL];
     const float s_x = quantize_s1_u8(x, S2_D_MODEL, xq_shifted);
-    alignas(64) float expert_out[MAX_TOP_K + 1][S2_D_MODEL];
-    for (int task = 0; task < w.top_k + 1; task++) {
-        if (task == 0) {
-            s2_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
-                          s_x, expert_out[0]);
-        } else {
-            const int expert = topk_idx[task - 1];
-            s2_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
-                          w.s_down[expert], xq_shifted, s_x,
-                          expert_out[task]);
-        }
+
+    alignas(64) float hidden[S2_ACTIVE_TASKS][S2_D_FF];
+    alignas(64) uint8_t hq_shifted[S2_ACTIVE_TASKS][S2_D_FF];
+    alignas(64) float hidden_scale[S2_ACTIVE_TASKS][16] = {};
+    S2TaskReady task_ready[S2_ACTIVE_TASKS];
+    int slots[S2_ACTIVE_TASKS] = {0};
+    float gate_scales[S2_ACTIVE_TASKS] = {w.sh_s_gate};
+    float up_scales[S2_ACTIVE_TASKS] = {w.sh_s_up};
+    float down_scales[S2_ACTIVE_TASKS] = {w.sh_s_down};
+    float mixtures[S2_ACTIVE_TASKS] = {1.0f};
+
+    for (int task = 1; task < S2_ACTIVE_TASKS; task++) {
+        const int expert = topk_idx[task - 1];
+        slots[task] = expert + 1;
+        gate_scales[task] = w.s_gate[expert];
+        up_scales[task] = w.s_up[expert];
+        down_scales[task] = w.s_down[expert];
+        mixtures[task] = affinity[expert] / gate_sum;
     }
 
-    for (int d = 0; d < S2_D_MODEL; d += 16) {
-        _mm512_storeu_ps(
-            y + d,
-            _mm512_add_ps(_mm512_loadu_ps(x + d),
-                          _mm512_load_ps(expert_out[0] + d)));
-    }
-
-    for (int k = 0; k < w.top_k; k++) {
-        const int expert = topk_idx[k];
-        const __m512 gate_vector =
-            _mm512_set1_ps(affinity[expert] / gate_sum);
-        for (int d = 0; d < S2_D_MODEL; d += 16) {
-            _mm512_storeu_ps(
-                y + d,
-                _mm512_fmadd_ps(
-                    gate_vector, _mm512_load_ps(expert_out[k + 1] + d),
-                    _mm512_loadu_ps(y + d)));
-        }
-    }
+    S2WorkContext work;
+    work.xq_shifted = xq_shifted;
+    work.s_x = s_x;
+    work.slots = slots;
+    work.gate_scales = gate_scales;
+    work.up_scales = up_scales;
+    work.down_scales = down_scales;
+    work.mixtures = mixtures;
+    work.hidden = hidden;
+    work.hq_shifted = hq_shifted;
+    work.hidden_scale = hidden_scale;
+    work.task_ready = task_ready;
+    work.x = x;
+    work.y = y;
+    s2_worker_pool().run(work);
 #else
     moe_forward_generic(x, w, y, num_tokens);
 #endif
