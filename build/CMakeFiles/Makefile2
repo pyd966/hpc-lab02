@@ -152,8 +152,8 @@ CMakeFiles/student.dir/clean:
 # Target rules for target CMakeFiles/lab2.dir
 
 # All Build rule for target.
-CMakeFiles/lab2.dir/all: CMakeFiles/framework.dir/all
 CMakeFiles/lab2.dir/all: CMakeFiles/student.dir/all
+CMakeFiles/lab2.dir/all: CMakeFiles/framework.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lab2.dir/build.make CMakeFiles/lab2.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lab2.dir/build.make CMakeFiles/lab2.dir/build
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/h3250106394/lab02/build/CMakeFiles --progress-num=4 "Built target lab2"

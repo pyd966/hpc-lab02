@@ -1,0 +1,87 @@
+problem size: num_tokens=1024 d_model=512 d_ff=128 num_experts=512 top_k=2 (500 iterations)
+Optimized time: 1.27878 s
+Result is correct! (rel RMSE: 0.000246886, worst token: 0.00843211 at 499)
+[ perf record: Woken up 437 times to write data ]
+[ perf record: Captured and wrote 0.991 MB /tmp/s4_perf.data (13102 samples) ]
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 13K of event 'cycles:Pu'
+# Event count (approx.): 70712444147
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                   Shared Object         IPC   [IPC Coverage]
+# ........  .......................................................................................................................................................................................................................................................................................................................................................................................................................................................................  ....................  ....................
+#
+    66.74%  [.] s4_execute_worker(int, S4WorkContext&)                                                                                                                                                                                                                                                                                                                                                                                                                               lab2                  -      -            
+            |          
+             --66.48%--s4_execute_worker(int, S4WorkContext&)
+                       |          
+                       |--62.89%--S4WorkerPool::worker_loop(int)
+                       |          0x100000000
+                       |          
+                        --3.59%--moe_forward_optimized(float const*, MoEWeights const&, float*, int)
+                                  0x7ffe7f385c80
+
+    16.46%  [.] S4WorkerPool::worker_loop(int)                                                                                                                                                                                                                                                                                                                                                                                                                                       lab2                  -      -            
+            |          
+             --16.46%--S4WorkerPool::worker_loop(int)
+                       0x100000000
+
+     4.09%  [.] s3_amx_projection(signed char const*, int, int, signed char const*, int, int*) [clone .constprop.1]                                                                                                                                                                                                                                                                                                                                                                  lab2                  -      -            
+     3.63%  [.] s4_vnni_projection(signed char const*, signed char const*, int const*, int, int, int*) [clone .constprop.1]                                                                                                                                                                                                                                                                                                                                                          lab2                  -      -            
+            |          
+             --3.62%--s4_execute_worker(int, S4WorkContext&)
+                       |          
+                        --3.44%--S4WorkerPool::worker_loop(int)
+                                  0x100000000
+
+     3.19%  [.] s4_amx_expert(S4WorkContext&, S4Task const&)                                                                                                                                                                                                                                                                                                                                                                                                                         lab2                  -      -            
+            |          
+             --3.18%--s4_amx_expert(S4WorkContext&, S4Task const&)
+                       s4_execute_worker(int, S4WorkContext&)
+                       |          
+                        --2.80%--S4WorkerPool::worker_loop(int)
+                                  0x100000000
+
+     1.10%  [.] int std::uniform_int_distribution<int>::operator()<std::mersenne_twister_engine<unsigned long, 32ul, 624ul, 397ul, 31ul, 2567483615ul, 11ul, 4294967295ul, 7ul, 2636928640ul, 15ul, 4022730752ul, 18ul, 1812433253ul> >(std::mersenne_twister_engine<unsigned long, 32ul, 624ul, 397ul, 31ul, 2567483615ul, 11ul, 4294967295ul, 7ul, 2636928640ul, 15ul, 4022730752ul, 18ul, 1812433253ul>&, std::uniform_int_distribution<int>::param_type const&) [clone .isra.0]  lab2                  -      -            
+            |          
+             --1.05%--int std::uniform_int_distribution<int>::operator()<std::mersenne_twister_engine<unsigned long, 32ul, 624ul, 397ul, 31ul, 2567483615ul, 11ul, 4294967295ul, 7ul, 2636928640ul, 15ul, 4022730752ul, 18ul, 1812433253ul> >(std::mersenne_twister_engine<unsigned long, 32ul, 624ul, 397ul, 31ul, 2567483615ul, 11ul, 4294967295ul, 7ul, 2636928640ul, 15ul, 4022730752ul, 18ul, 1812433253ul>&, std::uniform_int_distribution<int>::param_type const&) [clone .isra.0]
+
+     1.03%  [.] __memmove_avx512_unaligned_erms                                                                                                                                                                                                                                                                                                                                                                                                                                      libc.so.6             -      -            
+            |          
+             --0.80%--__memmove_avx512_unaligned_erms
+                       |          
+                        --0.73%--S4WorkerPool::worker_loop(int)
+                                  0x100000000
+
+     0.71%  [.] moe_forward_ref(float const*, MoEWeights const&, float*, int)                                                                                                                                                                                                                                                                                                                                                                                                        lab2                  -      -            
+     0.62%  [.] std::mersenne_twister_engine<unsigned long, 32ul, 624ul, 397ul, 31ul, 2567483615ul, 11ul, 4294967295ul, 7ul, 2636928640ul, 15ul, 4022730752ul, 18ul, 1812433253ul>::_M_gen_rand()                                                                                                                                                                                                                                                                                    lab2                  -      -            
+     0.61%  [.] __expf_fma                                                                                                                                                                                                                                                                                                                                                                                                                                                           libm.so.6             -      -            
+            |          
+             --0.59%--__expf_fma
+                       |          
+                        --0.50%--S4WorkerPool::worker_loop(int)
+                                  0x100000000
+
+     0.39%  [.] init_tokens(float*, int, int, unsigned long)                                                                                                                                                                                                                                                                                                                                                                                                                         lab2                  -      -            
+     0.29%  [.] init_data(float*, MoEWeights&, int, unsigned long)                                                                                                                                                                                                                                                                                                                                                                                                                   lab2                  -      -            
+     0.29%  [.] expert_ffn(signed char const*, signed char const*, signed char const*, float, float, float, signed char const*, float, float*, int, int)                                                                                                                                                                                                                                                                                                                             lab2                  -      -            
+     0.25%  [.] quantize_s3_s8(float const*, int, signed char*) [clone .constprop.1]                                                                                                                                                                                                                                                                                                                                                                                                 lab2                  -      -            
+     0.21%  [.] preprocess_s4(MoEWeights&)                                                                                                                                                                                                                                                                                                                                                                                                                                           lab2                  -      -            
+     0.18%  [.] memmove@plt                                                                                                                                                                                                                                                                                                                                                                                                                                                          lab2                  -      -            
+     0.08%  [.] __memset_avx512_unaligned_erms                                                                                                                                                                                                                                                                                                                                                                                                                                       libc.so.6             -      -            
+     0.04%  [.] __logf_fma                                                                                                                                                                                                                                                                                                                                                                                                                                                           libm.so.6             -      -            
+     0.04%  [.] expf@plt                                                                                                                                                                                                                                                                                                                                                                                                                                                             lab2                  -      -            
+     0.01%  [.] check_result(float const*, float const*, int, int)                                                                                                                                                                                                                                                                                                                                                                                                                   lab2                  -      -            
+     0.01%  [.] moe_forward_optimized(float const*, MoEWeights const&, float*, int)                                                                                                                                                                                                                                                                                                                                                                                                  lab2                  -      -            
+     0.01%  [.] void std::__introsort_loop<S4Task*, long, __gnu_cxx::__ops::_Iter_comp_iter<s4_build_tasks(S4WorkContext&)::{lambda(S4Task const&, S4Task const&)#1}> >(S4Task*, S4Task*, long, __gnu_cxx::__ops::_Iter_comp_iter<s4_build_tasks(S4WorkContext&)::{lambda(S4Task const&, S4Task const&)#1}>) [clone .isra.0]                                                                                                                                                         lab2                  -      -            
+     0.01%  [.] __llrintf                                                                                                                                                                                                                                                                                                                                                                                                                                                            libm.so.6             -      -            
+     0.00%  [k] 0xffffffffbb001928                                                                                                                                                                                                                                                                                                                                                                                                                                                   [unknown]             -      -            
+     0.00%  [.] call_init                                                                                                                                                                                                                                                                                                                                                                                                                                                            ld-linux-x86-64.so.2  -      -            
+
+
+#
+# (Tip: To measure approximate function latency with Processor Trace use perf record -e intel_pt// ... ; perf script --call-ret-trace)
+#

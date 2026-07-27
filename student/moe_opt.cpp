@@ -64,6 +64,23 @@ constexpr int S3_MAX_GROUPED_ROWS =
     S3_ROUTED_ASSIGNMENTS + S3_NUM_EXPERTS * (S3_TILE_ROWS - 1);
 constexpr int S3_MAX_TASKS = 2 + 2 * S3_NUM_EXPERTS;
 constexpr size_t S3_MATRIX_SIZE = (size_t)S3_D_MODEL * S3_D_FF;
+constexpr int S4_NUM_TOKENS = 1024;
+constexpr int S4_D_MODEL = 512;
+constexpr int S4_D_FF = 128;
+constexpr int S4_NUM_EXPERTS = 512;
+constexpr int S4_TOP_K = 2;
+constexpr int S4_THREADS = 16;
+constexpr int S4_ROUTED_ASSIGNMENTS = S4_NUM_TOKENS * S4_TOP_K;
+constexpr int S4_ROUTER_CANDIDATES = 40;
+constexpr int S4_AMX_THRESHOLD = 8;
+constexpr int S4_AMX_ROWS_PER_TASK = 96;
+constexpr int S4_SHARED_ROWS_PER_TASK = 96;
+constexpr int S4_MAX_GROUPED_ROWS =
+    S4_ROUTED_ASSIGNMENTS + S4_NUM_EXPERTS * (S3_TILE_ROWS - 1);
+constexpr int S4_MAX_TASKS =
+    16 + S4_NUM_EXPERTS +
+    2 * (S4_NUM_TOKENS / S4_AMX_ROWS_PER_TASK + 1);
+constexpr size_t S4_MATRIX_SIZE = (size_t)S4_D_MODEL * S4_D_FF;
 
 alignas(64) static float s1_router_transposed[S1_D_MODEL * S1_NUM_EXPERTS];
 alignas(64) static int8_t
@@ -79,6 +96,8 @@ alignas(64) static int32_t s1_down_sums[S1_EXPERT_SLOTS * S1_D_MODEL];
 static bool s1_preprocessed = false;
 static void start_s1_worker_pool();
 static void start_s2_worker_pool();
+static void start_s4_worker_pool();
+static void initialize_s4_context();
 alignas(64) static float s2_router_transposed[S2_D_MODEL * S2_NUM_EXPERTS];
 struct alignas(64) S2ExpertShard {
     alignas(64) int8_t gate[S2_SHARD_MATRIX_SIZE];
@@ -105,6 +124,22 @@ alignas(64) static int8_t
 alignas(64) static int8_t
     s3_down_packed[S3_EXPERT_SLOTS * S3_MATRIX_SIZE];
 static bool s3_preprocessed = false;
+
+alignas(64) static int8_t s4_router_packed[S4_NUM_EXPERTS * S4_D_MODEL];
+alignas(64) static int32_t s4_router_sums[S4_NUM_EXPERTS];
+alignas(64) static float s4_router_scales[S4_NUM_EXPERTS];
+static int8_t* s4_gate_packed = nullptr;
+static int8_t* s4_up_packed = nullptr;
+static int8_t* s4_down_packed = nullptr;
+alignas(64) static int32_t
+    s4_gate_sums[S4_NUM_EXPERTS * S4_D_FF];
+alignas(64) static int32_t s4_up_sums[S4_NUM_EXPERTS * S4_D_FF];
+alignas(64) static int32_t
+    s4_down_sums[S4_NUM_EXPERTS * S4_D_MODEL];
+alignas(64) static int8_t s4_shared_gate_packed[S4_MATRIX_SIZE];
+alignas(64) static int8_t s4_shared_up_packed[S4_MATRIX_SIZE];
+alignas(64) static int8_t s4_shared_down_packed[S4_MATRIX_SIZE];
+static bool s4_preprocessed = false;
 
 struct alignas(64) S3TileConfig {
     uint8_t palette_id;
@@ -147,6 +182,18 @@ static void pack_s3_matrix(const int8_t* src, int output_dim,
                 }
             }
         }
+    }
+}
+
+static void compute_row_sums(const int8_t* matrix, int output_dim,
+                             int reduction_dim, int32_t* sums) {
+    for (int output = 0; output < output_dim; output++) {
+        int32_t sum = 0;
+        const int8_t* row = matrix + (size_t)output * reduction_dim;
+        for (int reduction = 0; reduction < reduction_dim; reduction++) {
+            sum += row[reduction];
+        }
+        sums[output] = sum;
     }
 }
 
@@ -331,7 +378,72 @@ static void preprocess_s3(MoEWeights& w) {
 #endif
 }
 
-static void preprocess_s4(MoEWeights& w) {}
+static void preprocess_s4(MoEWeights& w) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
+    defined(__AMX_TILE__) && defined(__AMX_INT8__)
+    if (s4_preprocessed) return;
+
+    constexpr size_t routed_bytes =
+        (size_t)S4_NUM_EXPERTS * S4_MATRIX_SIZE;
+    s4_gate_packed = (int8_t*)std::aligned_alloc(64, routed_bytes);
+    s4_up_packed = (int8_t*)std::aligned_alloc(64, routed_bytes);
+    s4_down_packed = (int8_t*)std::aligned_alloc(64, routed_bytes);
+    if (!s4_gate_packed || !s4_up_packed || !s4_down_packed) std::abort();
+
+    alignas(64) int8_t quantized_router[S4_NUM_EXPERTS * S4_D_MODEL];
+    for (int expert = 0; expert < S4_NUM_EXPERTS; expert++) {
+        const float* row = w.w_router + (size_t)expert * S4_D_MODEL;
+        float amax = 0.0f;
+        for (int d = 0; d < S4_D_MODEL; d++) {
+            amax = std::max(amax, std::fabs(row[d]));
+        }
+        const float scale = amax > 0.0f ? amax / 127.0f : 1.0f;
+        const float inverse = amax > 0.0f ? 127.0f / amax : 1.0f;
+        int8_t* quantized =
+            quantized_router + (size_t)expert * S4_D_MODEL;
+        for (int d = 0; d < S4_D_MODEL; d++) {
+            quantized[d] = (int8_t)lrintf(row[d] * inverse);
+        }
+        s4_router_scales[expert] = scale;
+    }
+    compute_row_sums(quantized_router, S4_NUM_EXPERTS, S4_D_MODEL,
+                     s4_router_sums);
+    pack_s3_matrix(quantized_router, S4_NUM_EXPERTS, S4_D_MODEL,
+                   s4_router_packed);
+
+    pack_s3_matrix(w.sh_gate, S4_D_FF, S4_D_MODEL,
+                   s4_shared_gate_packed);
+    pack_s3_matrix(w.sh_up, S4_D_FF, S4_D_MODEL, s4_shared_up_packed);
+    pack_s3_matrix(w.sh_down, S4_D_MODEL, S4_D_FF,
+                   s4_shared_down_packed);
+
+    for (int expert = 0; expert < S4_NUM_EXPERTS; expert++) {
+        const size_t offset = (size_t)expert * S4_MATRIX_SIZE;
+        const int8_t* gate = w.w_gate + offset;
+        const int8_t* up = w.w_up + offset;
+        const int8_t* down = w.w_down + offset;
+        pack_s3_matrix(gate, S4_D_FF, S4_D_MODEL,
+                       s4_gate_packed + offset);
+        pack_s3_matrix(up, S4_D_FF, S4_D_MODEL, s4_up_packed + offset);
+        pack_s3_matrix(down, S4_D_MODEL, S4_D_FF,
+                       s4_down_packed + offset);
+        compute_row_sums(gate, S4_D_FF, S4_D_MODEL,
+                         s4_gate_sums + (size_t)expert * S4_D_FF);
+        compute_row_sums(up, S4_D_FF, S4_D_MODEL,
+                         s4_up_sums + (size_t)expert * S4_D_FF);
+        compute_row_sums(down, S4_D_MODEL, S4_D_FF,
+                         s4_down_sums + (size_t)expert * S4_D_MODEL);
+    }
+
+    s4_preprocessed = request_s3_amx_permission();
+    if (s4_preprocessed) {
+        initialize_s4_context();
+        start_s4_worker_pool();
+    }
+#else
+    (void)w;
+#endif
+}
 
 void preprocess(MoEWeights& w) {
     if (has_shape(w, 256, 128, 16, 4)) {
@@ -2120,6 +2232,726 @@ static void s3_execute_worker(int thread, S3WorkContext& work) {
     }
 }
 #endif
+#if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
+    defined(__AMX_TILE__) && defined(__AMX_INT8__)
+
+enum class S4TaskKind { SharedAmx, RoutedAmx, RoutedVnni };
+
+struct S4Task {
+    S4TaskKind kind;
+    int expert;
+    int first_row;
+    int valid_rows;
+    int padded_rows;
+    int cost;
+};
+
+struct alignas(64) S4WorkContext {
+    const float* x;
+    const MoEWeights* weights;
+    float* y;
+
+    alignas(64) int8_t xq[S4_NUM_TOKENS][S4_D_MODEL];
+    alignas(64) float input_scales[S4_NUM_TOKENS];
+    alignas(64)
+        int32_t router_acc[S4_NUM_TOKENS][S4_NUM_EXPERTS];
+    int selected_experts[S4_NUM_TOKENS][S4_TOP_K];
+    float selected_mixtures[S4_NUM_TOKENS][S4_TOP_K];
+
+    alignas(64) int local_counts[S4_THREADS][S4_NUM_EXPERTS];
+    alignas(64) int thread_offsets[S4_THREADS][S4_NUM_EXPERTS];
+    int expert_counts[S4_NUM_EXPERTS];
+    int expert_offsets[S4_NUM_EXPERTS + 1];
+
+    alignas(64) int8_t grouped_xq[S4_MAX_GROUPED_ROWS][S4_D_MODEL];
+    alignas(64) float grouped_scales[S4_MAX_GROUPED_ROWS];
+    alignas(64) int grouped_tokens[S4_MAX_GROUPED_ROWS];
+    alignas(64) int grouped_ranks[S4_MAX_GROUPED_ROWS];
+    alignas(64) float grouped_mixtures[S4_MAX_GROUPED_ROWS];
+
+    alignas(64)
+        float routed_output[S4_TOP_K][S4_NUM_TOKENS][S4_D_MODEL];
+
+    S4Task tasks[S4_MAX_TASKS];
+    int task_count;
+    int thread_task_count[S4_THREADS];
+    int thread_tasks[S4_THREADS][S4_MAX_TASKS];
+
+    alignas(64) std::atomic<int> quantize_arrived{0};
+    alignas(64) std::atomic<int> router_arrived{0};
+    alignas(64) std::atomic<int> route_arrived{0};
+    alignas(64) std::atomic<int> offsets_ready{0};
+    alignas(64) std::atomic<int> scatter_arrived{0};
+    alignas(64) std::atomic<int> expert_arrived{0};
+};
+
+static void s4_execute_worker(int thread, S4WorkContext& work);
+
+static inline void s4_barrier(std::atomic<int>& arrived) {
+    arrived.fetch_add(1, std::memory_order_acq_rel);
+    while (arrived.load(std::memory_order_acquire) != S4_THREADS) {
+        _mm_pause();
+    }
+}
+
+static inline const int8_t* s4_vnni_block(const int8_t* packed,
+                                          int reduction_dim,
+                                          int output_block,
+                                          int reduction_block4) {
+    const int reduction_tiles = reduction_dim / S3_TILE_BYTES;
+    return packed +
+           ((size_t)output_block * reduction_tiles +
+            reduction_block4 / 16) *
+               1024 +
+           (reduction_block4 & 15) * 64;
+}
+
+static inline __m512i s4_shifted_activation(const int8_t* input,
+                                             int reduction_block4) {
+    uint32_t word;
+    std::memcpy(&word, input + reduction_block4 * 4, sizeof(word));
+    return _mm512_set1_epi32((int)(word ^ 0x80808080u));
+}
+
+static void s4_vnni_projection(const int8_t* input, const int8_t* weights,
+                               const int32_t* row_sums, int reduction_dim,
+                               int output_dim, int32_t* output) {
+    constexpr int blocks_at_once = 8;
+    const int output_blocks = output_dim / 16;
+    const int reduction_blocks = reduction_dim / 4;
+    for (int first_ob = 0; first_ob < output_blocks;
+         first_ob += blocks_at_once) {
+        const int active =
+            std::min(blocks_at_once, output_blocks - first_ob);
+        __m512i accumulator[blocks_at_once];
+        for (int local = 0; local < active; local++) {
+            accumulator[local] = _mm512_sub_epi32(
+                _mm512_setzero_si512(),
+                _mm512_slli_epi32(
+                    _mm512_load_si512((const __m512i*)(
+                        row_sums + (first_ob + local) * 16)),
+                    7));
+        }
+        for (int rb = 0; rb < reduction_blocks; rb++) {
+            const __m512i activation = s4_shifted_activation(input, rb);
+            for (int local = 0; local < active; local++) {
+                accumulator[local] = s2_dpbusd_mem(
+                    accumulator[local], activation,
+                    s4_vnni_block(weights, reduction_dim,
+                                  first_ob + local, rb));
+            }
+        }
+        for (int local = 0; local < active; local++) {
+            _mm512_store_si512(
+                (__m512i*)(output + (first_ob + local) * 16),
+                accumulator[local]);
+        }
+    }
+}
+
+static void s4_router_select(
+    const float* x, const int32_t* router_acc, float input_scale,
+    const MoEWeights& w, int selected[S4_TOP_K],
+    float mixtures[S4_TOP_K]) {
+    alignas(64) float approximate_scores[S4_NUM_EXPERTS];
+    constexpr int output_blocks = S4_NUM_EXPERTS / 16;
+
+    for (int block = 0; block < output_blocks; block++) {
+        const int expert = block * 16;
+        const __m512 scale = _mm512_mul_ps(
+            _mm512_set1_ps(input_scale),
+            _mm512_load_ps(s4_router_scales + expert));
+        const __m512 logit = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(_mm512_load_si512(
+                (const __m512i*)(router_acc + expert))),
+            scale);
+        const __m512 affinity = reciprocal512_ps(_mm512_add_ps(
+            _mm512_set1_ps(1.0f),
+            exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), logit))));
+        _mm512_store_ps(
+            approximate_scores + expert,
+            _mm512_add_ps(affinity, _mm512_loadu_ps(w.bias + expert)));
+    }
+
+    constexpr int extra_blocks =
+        S4_ROUTER_CANDIDATES - output_blocks;
+    int candidates[S4_ROUTER_CANDIDATES];
+    int second_candidates[output_blocks];
+    float block_scores[output_blocks];
+    const __m512 negative_infinity =
+        _mm512_set1_ps(-3.402823466e+38F);
+    for (int block = 0; block < output_blocks; block++) {
+        __m512 scores =
+            _mm512_load_ps(approximate_scores + block * 16);
+        const float first_score = _mm512_reduce_max_ps(scores);
+        const __mmask16 first_matches = _mm512_cmp_ps_mask(
+            scores, _mm512_set1_ps(first_score), _CMP_EQ_OQ);
+        const int first_lane = __builtin_ctz((unsigned)first_matches);
+        candidates[block] = block * 16 + first_lane;
+        block_scores[block] = first_score;
+        scores = _mm512_mask_mov_ps(
+            scores, (__mmask16)(1u << first_lane), negative_infinity);
+        const float second_score = _mm512_reduce_max_ps(scores);
+        const __mmask16 second_matches = _mm512_cmp_ps_mask(
+            scores, _mm512_set1_ps(second_score), _CMP_EQ_OQ);
+        second_candidates[block] =
+            block * 16 + __builtin_ctz((unsigned)second_matches);
+    }
+
+    float top_block_scores[extra_blocks];
+    int top_blocks[extra_blocks];
+    for (int i = 0; i < extra_blocks; i++) {
+        top_block_scores[i] = -3.402823466e+38F;
+        top_blocks[i] = output_blocks;
+    }
+    for (int block = 0; block < output_blocks; block++) {
+        int position = extra_blocks;
+        for (int i = 0; i < extra_blocks; i++) {
+            if (block_scores[block] > top_block_scores[i]) {
+                position = i;
+                break;
+            }
+        }
+        if (position == extra_blocks) continue;
+        for (int i = extra_blocks - 1; i > position; i--) {
+            top_block_scores[i] = top_block_scores[i - 1];
+            top_blocks[i] = top_blocks[i - 1];
+        }
+        top_block_scores[position] = block_scores[block];
+        top_blocks[position] = block;
+    }
+    for (int i = 0; i < extra_blocks; i++) {
+        candidates[output_blocks + i] = second_candidates[top_blocks[i]];
+    }
+
+    float best_scores[S4_TOP_K] = {-3.402823466e+38F,
+                                   -3.402823466e+38F};
+    float best_affinities[S4_TOP_K] = {};
+    selected[0] = selected[1] = S4_NUM_EXPERTS;
+    for (int candidate = 0; candidate < S4_ROUTER_CANDIDATES; candidate++) {
+        const int expert = candidates[candidate];
+        const float* weights =
+            w.w_router + (size_t)expert * S4_D_MODEL;
+        __m512 accumulator[4] = {_mm512_setzero_ps(), _mm512_setzero_ps(),
+                                _mm512_setzero_ps(), _mm512_setzero_ps()};
+        for (int d = 0; d < S4_D_MODEL; d += 64) {
+            accumulator[0] = _mm512_fmadd_ps(
+                _mm512_loadu_ps(x + d),
+                _mm512_loadu_ps(weights + d), accumulator[0]);
+            accumulator[1] = _mm512_fmadd_ps(
+                _mm512_loadu_ps(x + d + 16),
+                _mm512_loadu_ps(weights + d + 16), accumulator[1]);
+            accumulator[2] = _mm512_fmadd_ps(
+                _mm512_loadu_ps(x + d + 32),
+                _mm512_loadu_ps(weights + d + 32), accumulator[2]);
+            accumulator[3] = _mm512_fmadd_ps(
+                _mm512_loadu_ps(x + d + 48),
+                _mm512_loadu_ps(weights + d + 48), accumulator[3]);
+        }
+        const __m512 sum01 = _mm512_add_ps(accumulator[0], accumulator[1]);
+        const __m512 sum23 = _mm512_add_ps(accumulator[2], accumulator[3]);
+        const float logit =
+            _mm512_reduce_add_ps(_mm512_add_ps(sum01, sum23));
+        const float affinity = 1.0f / (1.0f + expf(-logit));
+        const float score = affinity + w.bias[expert];
+
+        for (int k = 0; k < S4_TOP_K; k++) {
+            if (score > best_scores[k] ||
+                (score == best_scores[k] && expert < selected[k])) {
+                for (int move = S4_TOP_K - 1; move > k; move--) {
+                    best_scores[move] = best_scores[move - 1];
+                    best_affinities[move] = best_affinities[move - 1];
+                    selected[move] = selected[move - 1];
+                }
+                best_scores[k] = score;
+                best_affinities[k] = affinity;
+                selected[k] = expert;
+                break;
+            }
+        }
+    }
+
+    const float gate_sum = best_affinities[0] + best_affinities[1];
+    mixtures[0] = best_affinities[0] / gate_sum;
+    mixtures[1] = best_affinities[1] / gate_sum;
+}
+
+static void s4_vnni_expert(const S4WorkContext& work, int expert, int row) {
+    const MoEWeights& w = *work.weights;
+    const int8_t* input = work.grouped_xq[row];
+    alignas(64) int32_t gate_acc[S4_D_FF];
+    alignas(64) int32_t up_acc[S4_D_FF];
+    alignas(64) float hidden[S4_D_FF];
+    alignas(64) int8_t hidden_q[S4_D_FF];
+    alignas(64) int32_t down_acc[S4_D_MODEL];
+
+    const size_t weight_offset = (size_t)expert * S4_MATRIX_SIZE;
+    s4_vnni_projection(
+        input, s4_gate_packed + weight_offset,
+        s4_gate_sums + (size_t)expert * S4_D_FF, S4_D_MODEL,
+        S4_D_FF, gate_acc);
+    s4_vnni_projection(
+        input, s4_up_packed + weight_offset,
+        s4_up_sums + (size_t)expert * S4_D_FF, S4_D_MODEL,
+        S4_D_FF, up_acc);
+
+    const __m512 gate_scale = _mm512_set1_ps(
+        work.grouped_scales[row] * w.s_gate[expert]);
+    const __m512 up_scale = _mm512_set1_ps(
+        work.grouped_scales[row] * w.s_up[expert]);
+    for (int f = 0; f < S4_D_FF; f += 16) {
+        const __m512 gate = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(gate_acc + f))),
+            gate_scale);
+        const __m512 up = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(up_acc + f))),
+            up_scale);
+        const __m512 sigmoid = reciprocal512_ps(_mm512_add_ps(
+            _mm512_set1_ps(1.0f),
+            exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), gate))));
+        _mm512_store_ps(hidden + f,
+                        _mm512_mul_ps(_mm512_mul_ps(gate, sigmoid), up));
+    }
+
+    const float hidden_scale =
+        quantize_s3_s8(hidden, S4_D_FF, hidden_q);
+    s4_vnni_projection(
+        hidden_q, s4_down_packed + weight_offset,
+        s4_down_sums + (size_t)expert * S4_D_MODEL, S4_D_FF,
+        S4_D_MODEL, down_acc);
+
+    const int token = work.grouped_tokens[row];
+    const int rank = work.grouped_ranks[row];
+    float* output =
+        const_cast<float*>(&work.routed_output[rank][token][0]);
+    const __m512 scale = _mm512_set1_ps(
+        hidden_scale * w.s_down[expert] * work.grouped_mixtures[row]);
+    for (int d = 0; d < S4_D_MODEL; d += 16) {
+        _mm512_store_ps(
+            output + d,
+            _mm512_mul_ps(
+                _mm512_cvtepi32_ps(
+                    _mm512_load_si512((const __m512i*)(down_acc + d))),
+                scale));
+    }
+}
+
+static void s4_amx_expert(S4WorkContext& work, const S4Task& task) {
+    const MoEWeights& w = *work.weights;
+    const bool shared = task.kind == S4TaskKind::SharedAmx;
+    const int expert = task.expert;
+    const int8_t* input =
+        shared ? work.xq[task.first_row] : work.grouped_xq[task.first_row];
+    const float* input_scales =
+        shared ? work.input_scales + task.first_row
+               : work.grouped_scales + task.first_row;
+    const int8_t* gate =
+        shared ? s4_shared_gate_packed
+               : s4_gate_packed + (size_t)expert * S4_MATRIX_SIZE;
+    const int8_t* up =
+        shared ? s4_shared_up_packed
+               : s4_up_packed + (size_t)expert * S4_MATRIX_SIZE;
+    const int8_t* down =
+        shared ? s4_shared_down_packed
+               : s4_down_packed + (size_t)expert * S4_MATRIX_SIZE;
+    const float gate_weight_scale =
+        shared ? w.sh_s_gate : w.s_gate[expert];
+    const float up_weight_scale =
+        shared ? w.sh_s_up : w.s_up[expert];
+    const float down_weight_scale =
+        shared ? w.sh_s_down : w.s_down[expert];
+
+    alignas(64)
+        int32_t gate_acc[S4_AMX_ROWS_PER_TASK * S4_D_FF];
+    alignas(64)
+        int32_t up_acc[S4_AMX_ROWS_PER_TASK * S4_D_FF];
+    alignas(64) float hidden[S4_AMX_ROWS_PER_TASK * S4_D_FF];
+    alignas(64) int8_t hidden_q[S4_AMX_ROWS_PER_TASK * S4_D_FF];
+    alignas(64) float hidden_scales[S4_AMX_ROWS_PER_TASK];
+    alignas(64)
+        int32_t down_acc[S4_AMX_ROWS_PER_TASK * S4_D_MODEL];
+
+    s3_amx_projection(input, task.padded_rows, S4_D_MODEL, gate,
+                      S4_D_FF, gate_acc);
+    s3_amx_projection(input, task.padded_rows, S4_D_MODEL, up,
+                      S4_D_FF, up_acc);
+
+    for (int row = 0; row < task.valid_rows; row++) {
+        const __m512 gate_scale =
+            _mm512_set1_ps(input_scales[row] * gate_weight_scale);
+        const __m512 up_scale =
+            _mm512_set1_ps(input_scales[row] * up_weight_scale);
+        for (int f = 0; f < S4_D_FF; f += 16) {
+            const size_t offset = (size_t)row * S4_D_FF + f;
+            const __m512 gate_value = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(_mm512_load_si512(
+                    (const __m512i*)(gate_acc + offset))),
+                gate_scale);
+            const __m512 up_value = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(_mm512_load_si512(
+                    (const __m512i*)(up_acc + offset))),
+                up_scale);
+            const __m512 sigmoid = reciprocal512_ps(_mm512_add_ps(
+                _mm512_set1_ps(1.0f),
+                exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(),
+                                       gate_value))));
+            _mm512_store_ps(
+                hidden + offset,
+                _mm512_mul_ps(
+                    _mm512_mul_ps(gate_value, sigmoid), up_value));
+        }
+        hidden_scales[row] = quantize_s3_s8(
+            hidden + (size_t)row * S4_D_FF, S4_D_FF,
+            hidden_q + (size_t)row * S4_D_FF);
+    }
+    if (task.padded_rows > task.valid_rows) {
+        std::memset(
+            hidden_q + (size_t)task.valid_rows * S4_D_FF, 0,
+            (size_t)(task.padded_rows - task.valid_rows) * S4_D_FF);
+    }
+
+    s3_amx_projection(hidden_q, task.padded_rows, S4_D_FF, down,
+                      S4_D_MODEL, down_acc);
+    for (int row = 0; row < task.valid_rows; row++) {
+        const int source_row = task.first_row + row;
+        const int token =
+            shared ? source_row : work.grouped_tokens[source_row];
+        const float mixture =
+            shared ? 1.0f : work.grouped_mixtures[source_row];
+        const __m512 scale = _mm512_set1_ps(
+            hidden_scales[row] * down_weight_scale * mixture);
+        for (int d = 0; d < S4_D_MODEL; d += 16) {
+            const __m512 result = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(_mm512_load_si512(
+                    (const __m512i*)(down_acc +
+                                     (size_t)row * S4_D_MODEL + d))),
+                scale);
+            if (shared) {
+                _mm512_storeu_ps(
+                    work.y + (size_t)token * S4_D_MODEL + d,
+                    _mm512_add_ps(
+                        _mm512_loadu_ps(
+                            work.x + (size_t)token * S4_D_MODEL + d),
+                        result));
+            } else {
+                const int rank = work.grouped_ranks[source_row];
+                _mm512_store_ps(
+                    work.routed_output[rank][token] + d, result);
+            }
+        }
+    }
+}
+
+static void s4_build_tasks(S4WorkContext& work) {
+    work.task_count = 0;
+    for (int first = 0; first < S4_NUM_TOKENS;
+         first += S4_SHARED_ROWS_PER_TASK) {
+        const int valid =
+            std::min(S4_SHARED_ROWS_PER_TASK, S4_NUM_TOKENS - first);
+        const int padded =
+            (valid + S3_TILE_ROWS - 1) & -S3_TILE_ROWS;
+        S4Task& task = work.tasks[work.task_count++];
+        task = {S4TaskKind::SharedAmx, -1, first, valid, padded,
+                2800 + 900 * (padded / S3_TILE_ROWS)};
+    }
+
+    for (int expert = 0; expert < S4_NUM_EXPERTS; expert++) {
+        const int rows = work.expert_counts[expert];
+        if (rows == 0) continue;
+        if (rows < S4_AMX_THRESHOLD) {
+            S4Task& task = work.tasks[work.task_count++];
+            task = {S4TaskKind::RoutedVnni, expert,
+                    work.expert_offsets[expert], rows, rows,
+                    3400 * rows + 500};
+            continue;
+        }
+
+        int consumed = 0;
+        while (consumed < rows) {
+            const int valid =
+                std::min(S4_AMX_ROWS_PER_TASK, rows - consumed);
+            const int padded =
+                (valid + S3_TILE_ROWS - 1) & -S3_TILE_ROWS;
+            S4Task& task = work.tasks[work.task_count++];
+            task = {S4TaskKind::RoutedAmx, expert,
+                    work.expert_offsets[expert] + consumed, valid, padded,
+                    2800 + 900 * (padded / S3_TILE_ROWS)};
+            consumed += valid;
+        }
+    }
+
+    std::sort(work.tasks, work.tasks + work.task_count,
+              [](const S4Task& first, const S4Task& second) {
+                  return first.cost > second.cost;
+              });
+    int thread_cost[S4_THREADS] = {};
+    std::memset(work.thread_task_count, 0,
+                sizeof(work.thread_task_count));
+    for (int task = 0; task < work.task_count; task++) {
+        int target = 0;
+        const int eligible_threads =
+            work.tasks[task].kind == S4TaskKind::RoutedVnni
+                ? S4_THREADS
+                : S4_THREADS / 2;
+        for (int thread = 1; thread < eligible_threads; thread++) {
+            if (thread_cost[thread] < thread_cost[target]) {
+                target = thread;
+            }
+        }
+        work.thread_tasks[target][work.thread_task_count[target]++] =
+            task;
+        thread_cost[target] += work.tasks[task].cost;
+    }
+}
+
+static void s4_execute_worker(int thread, S4WorkContext& work) {
+    const MoEWeights& w = *work.weights;
+    const int first_token =
+        thread * (S4_NUM_TOKENS / S4_THREADS);
+    const int last_token =
+        first_token + S4_NUM_TOKENS / S4_THREADS;
+    int* local_counts = work.local_counts[thread];
+    std::memset(local_counts, 0,
+                S4_NUM_EXPERTS * sizeof(local_counts[0]));
+    static thread_local bool amx_ready = request_s3_amx_permission();
+    if (!amx_ready) std::abort();
+
+    for (int token = first_token; token < last_token; token++) {
+        work.input_scales[token] = quantize_s3_s8(
+            work.x + (size_t)token * S4_D_MODEL, S4_D_MODEL,
+            work.xq[token]);
+    }
+    s4_barrier(work.quantize_arrived);
+
+    if (thread < S4_THREADS / 2) {
+        constexpr int router_rows =
+            S4_NUM_TOKENS / (S4_THREADS / 2);
+        const int router_first = thread * router_rows;
+        _tile_loadconfig(&s3_tile_config);
+        s3_amx_projection(
+            work.xq[router_first], router_rows, S4_D_MODEL,
+            s4_router_packed, S4_NUM_EXPERTS,
+            &work.router_acc[router_first][0]);
+        _tile_release();
+    }
+    s4_barrier(work.router_arrived);
+
+    for (int token = first_token; token < last_token; token++) {
+        s4_router_select(
+            work.x + (size_t)token * S4_D_MODEL,
+            work.router_acc[token], work.input_scales[token], w,
+            work.selected_experts[token],
+            work.selected_mixtures[token]);
+        local_counts[work.selected_experts[token][0]]++;
+        local_counts[work.selected_experts[token][1]]++;
+    }
+
+    s4_barrier(work.route_arrived);
+    if (thread == 0) {
+        int grouped_row = 0;
+        for (int expert = 0; expert < S4_NUM_EXPERTS; expert++) {
+            work.expert_offsets[expert] = grouped_row;
+            int count = 0;
+            for (int owner = 0; owner < S4_THREADS; owner++) {
+                work.thread_offsets[owner][expert] =
+                    grouped_row + count;
+                count += work.local_counts[owner][expert];
+            }
+            work.expert_counts[expert] = count;
+            const int padded =
+                (count + S3_TILE_ROWS - 1) & -S3_TILE_ROWS;
+            if (padded > count) {
+                std::memset(work.grouped_xq[grouped_row + count], 0,
+                            (size_t)(padded - count) * S4_D_MODEL);
+            }
+            grouped_row += padded;
+        }
+        work.expert_offsets[S4_NUM_EXPERTS] = grouped_row;
+        s4_build_tasks(work);
+        work.offsets_ready.store(1, std::memory_order_release);
+    } else {
+        while (work.offsets_ready.load(std::memory_order_acquire) == 0) {
+            _mm_pause();
+        }
+    }
+
+    int cursor[S4_NUM_EXPERTS];
+    std::memcpy(cursor, work.thread_offsets[thread], sizeof(cursor));
+    for (int token = first_token; token < last_token; token++) {
+        for (int rank = 0; rank < S4_TOP_K; rank++) {
+            const int expert = work.selected_experts[token][rank];
+            const int row = cursor[expert]++;
+            std::memcpy(work.grouped_xq[row], work.xq[token],
+                        S4_D_MODEL);
+            work.grouped_scales[row] = work.input_scales[token];
+            work.grouped_tokens[row] = token;
+            work.grouped_ranks[row] = rank;
+            work.grouped_mixtures[row] =
+                work.selected_mixtures[token][rank];
+        }
+    }
+    s4_barrier(work.scatter_arrived);
+
+    _tile_loadconfig(&s3_tile_config);
+    for (int index = 0; index < work.thread_task_count[thread];
+         index++) {
+        const S4Task& task =
+            work.tasks[work.thread_tasks[thread][index]];
+        if (task.kind == S4TaskKind::RoutedVnni) {
+            for (int row = task.first_row;
+                 row < task.first_row + task.valid_rows; row++) {
+                s4_vnni_expert(work, task.expert, row);
+            }
+        } else {
+            s4_amx_expert(work, task);
+        }
+    }
+    _tile_release();
+
+    s4_barrier(work.expert_arrived);
+    for (int token = first_token; token < last_token; token++) {
+        for (int d = 0; d < S4_D_MODEL; d += 16) {
+            __m512 output = _mm512_loadu_ps(
+                work.y + (size_t)token * S4_D_MODEL + d);
+            output = _mm512_add_ps(
+                output,
+                _mm512_load_ps(work.routed_output[0][token] + d));
+            output = _mm512_add_ps(
+                output,
+                _mm512_load_ps(work.routed_output[1][token] + d));
+            _mm512_storeu_ps(
+                work.y + (size_t)token * S4_D_MODEL + d, output);
+        }
+    }
+}
+
+class S4WorkerPool {
+   public:
+    ~S4WorkerPool() {
+        stop.store(true, std::memory_order_release);
+        generation.fetch_add(1, std::memory_order_release);
+        for (int i = 0; i < S4_THREADS - 1; i++) {
+            if (workers[i].joinable()) workers[i].join();
+        }
+    }
+
+    void start() {
+        if (started) return;
+        started = true;
+        for (int i = 0; i < S4_THREADS - 1; i++) {
+            workers[i] =
+                std::thread(&S4WorkerPool::worker_loop, this, i + 1);
+        }
+        while (ready.load(std::memory_order_acquire) !=
+               S4_THREADS - 1) {
+            _mm_pause();
+        }
+#ifdef _OPENMP
+        pin_workers();
+#endif
+    }
+
+    void run(S4WorkContext& work) {
+        context.store(&work, std::memory_order_relaxed);
+        const uint64_t current = ++next_generation;
+        generation.store(current, std::memory_order_release);
+        s4_execute_worker(0, work);
+        for (int i = 0; i < S4_THREADS - 1; i++) {
+            while (completed[i].load(std::memory_order_acquire) !=
+                   current) {
+                _mm_pause();
+            }
+        }
+    }
+
+   private:
+#ifdef _OPENMP
+    static void pin_one(pthread_t handle, int cpu) {
+        if (cpu < 0 || cpu >= CPU_SETSIZE) return;
+        cpu_set_t affinity;
+        CPU_ZERO(&affinity);
+        CPU_SET(cpu, &affinity);
+        pthread_setaffinity_np(handle, sizeof(affinity), &affinity);
+    }
+
+    void pin_workers() {
+        int place_cpus[CPU_SETSIZE][2];
+        int place_sizes[CPU_SETSIZE] = {};
+        const int place_count =
+            std::min(omp_get_num_places(), CPU_SETSIZE);
+        for (int place = 0; place < place_count; place++) {
+            const int count = omp_get_place_num_procs(place);
+            if (count <= 0 || count > 2) return;
+            int ids[2];
+            omp_get_place_proc_ids(place, ids);
+            place_sizes[place] = count;
+            for (int i = 0; i < count; i++) {
+                place_cpus[place][i] = ids[i];
+            }
+        }
+
+        int cpus[S4_THREADS];
+        int cpu_count = 0;
+        for (int lane = 0; lane < 2 && cpu_count < S4_THREADS; lane++) {
+            for (int place = 0;
+                 place < place_count && cpu_count < S4_THREADS; place++) {
+                if (lane < place_sizes[place]) {
+                    cpus[cpu_count++] = place_cpus[place][lane];
+                }
+            }
+        }
+        if (cpu_count < S4_THREADS) return;
+        pin_one(pthread_self(), cpus[0]);
+        for (int i = 0; i < S4_THREADS - 1; i++) {
+            pin_one(workers[i].native_handle(), cpus[i + 1]);
+        }
+    }
+#endif
+
+    void worker_loop(int thread) {
+        uint64_t observed = generation.load(std::memory_order_acquire);
+        ready.fetch_add(1, std::memory_order_release);
+        while (!stop.load(std::memory_order_acquire)) {
+            uint64_t current;
+            do {
+                current = generation.load(std::memory_order_acquire);
+                if (stop.load(std::memory_order_relaxed)) return;
+                _mm_pause();
+            } while (current == observed);
+            observed = current;
+            S4WorkContext* work =
+                context.load(std::memory_order_relaxed);
+            s4_execute_worker(thread, *work);
+            completed[thread - 1].store(current,
+                                         std::memory_order_release);
+        }
+    }
+
+    std::thread workers[S4_THREADS - 1];
+    alignas(64) std::atomic<uint64_t> completed[S4_THREADS - 1];
+    alignas(64) std::atomic<S4WorkContext*> context{nullptr};
+    alignas(64) std::atomic<uint64_t> generation{0};
+    alignas(64) std::atomic<int> ready{0};
+    std::atomic<bool> stop{false};
+    uint64_t next_generation = 0;
+    bool started = false;
+};
+
+static S4WorkContext* s4_context = nullptr;
+
+static void initialize_s4_context() {
+    if (!s4_context) s4_context = new S4WorkContext();
+}
+static S4WorkerPool& s4_worker_pool() {
+    static S4WorkerPool pool;
+    return pool;
+}
+
+static void start_s4_worker_pool() { s4_worker_pool().start(); }
+
+#endif
 
 static void moe_forward_optimized_s3(const float* x, const MoEWeights& w,
                                      float* y, int num_tokens) {
@@ -2144,7 +2976,27 @@ static void moe_forward_optimized_s3(const float* x, const MoEWeights& w,
 
 static void moe_forward_optimized_s4(const float* x, const MoEWeights& w,
                                      float* y, int num_tokens) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
+    defined(__AMX_TILE__) && defined(__AMX_INT8__)
+    if (!s4_preprocessed || !s4_context || num_tokens != S4_NUM_TOKENS) {
+        moe_forward_generic(x, w, y, num_tokens);
+        return;
+    }
+
+    S4WorkContext& work = *s4_context;
+    work.x = x;
+    work.weights = &w;
+    work.y = y;
+    work.route_arrived.store(0, std::memory_order_relaxed);
+    work.quantize_arrived.store(0, std::memory_order_relaxed);
+    work.router_arrived.store(0, std::memory_order_relaxed);
+    work.offsets_ready.store(0, std::memory_order_relaxed);
+    work.scatter_arrived.store(0, std::memory_order_relaxed);
+    work.expert_arrived.store(0, std::memory_order_relaxed);
+    s4_worker_pool().run(work);
+#else
     moe_forward_generic(x, w, y, num_tokens);
+#endif
 }
 
 void moe_forward_optimized(const float* x, const MoEWeights& w, float* y,

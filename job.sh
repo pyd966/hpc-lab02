@@ -29,7 +29,7 @@ run_case() {
     ./build/lab2 "$@"
 }
 
-# run_case S1 1 256 128 16 4 "${ITER_S1}"
-# run_case S2 1 1024 512 16 4 "${ITER_S2}"
+run_case S1 1 256 128 16 4 "${ITER_S1}"
+run_case S2 1 1024 512 16 4 "${ITER_S2}"
 run_case S3 128 256 128 16 4 "${ITER_S3}"
-# run_case S4 1024 512 128 512 2 "${ITER_S4}"
+run_case S4 1024 512 128 512 2 "${ITER_S4}"

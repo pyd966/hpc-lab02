@@ -1,0 +1,49 @@
+-- The C compiler identification is GNU 14.2.0
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test COMPILER_SUPPORTS_SPR
+-- Performing Test COMPILER_SUPPORTS_SPR - Success
+-- Configuring done (15.4s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/h3250106394/lab02/build
+[ 80%] Building CXX object CMakeFiles/framework.dir/src/data.cpp.o
+[ 80%] Building CXX object CMakeFiles/framework.dir/main.cpp.o
+[ 80%] Building CXX object CMakeFiles/framework.dir/src/moe_ref.cpp.o
+[ 80%] Building CXX object CMakeFiles/student.dir/student/moe_opt.cpp.o
+[ 80%] Built target framework
+[ 80%] Built target student
+[100%] Linking CXX executable lab2
+[100%] Built target lab2
+===== S1 =====
+problem size: num_tokens=1 d_model=256 d_ff=128 num_experts=16 top_k=4 (10000 iterations)
+Baseline time:  0.516694 s
+Optimized time: 0.0235452 s
+Result is correct! (rel RMSE: 7.08279e-08, worst token: 7.08279e-08 at 0)
+Speedup: 21.9448
+===== S2 =====
+problem size: num_tokens=1 d_model=1024 d_ff=512 num_experts=16 top_k=4 (10000 iterations)
+Baseline time:  6.17347 s
+Optimized time: 0.22573 s
+Result is correct! (rel RMSE: 6.43357e-08, worst token: 6.43357e-08 at 0)
+Speedup: 27.3488
+===== S3 =====
+problem size: num_tokens=128 d_model=256 d_ff=128 num_experts=16 top_k=4 (1000 iterations)
+Baseline time:  6.62319 s
+Optimized time: 0.0637889 s
+Result is correct! (rel RMSE: 1.16967e-07, worst token: 2.47184e-07 at 125)
+Speedup: 103.83
+===== S4 =====
+problem size: num_tokens=1024 d_model=512 d_ff=128 num_experts=512 top_k=2 (30 iterations)
+Baseline time:  6.8532 s
+Optimized time: 0.0469426 s
+Result is correct! (rel RMSE: 0.000246886, worst token: 0.00843211 at 499)
+Speedup: 145.991
