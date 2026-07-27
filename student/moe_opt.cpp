@@ -59,6 +59,10 @@ constexpr int S3_ROUTED_ASSIGNMENTS = S3_NUM_TOKENS * S3_TOP_K;
 constexpr int S3_TILE_ROWS = 16;
 constexpr int S3_TILE_BYTES = 64;
 constexpr int S3_C_TILES = 6;
+constexpr int S3_THREADS = 8;
+constexpr int S3_MAX_GROUPED_ROWS =
+    S3_ROUTED_ASSIGNMENTS + S3_NUM_EXPERTS * (S3_TILE_ROWS - 1);
+constexpr int S3_MAX_TASKS = 2 + 2 * S3_NUM_EXPERTS;
 constexpr size_t S3_MATRIX_SIZE = (size_t)S3_D_MODEL * S3_D_FF;
 
 alignas(64) static float s1_router_transposed[S1_D_MODEL * S1_NUM_EXPERTS];
@@ -680,8 +684,9 @@ static inline void s3_tile_store_down(
 static void s3_amx_down(const int8_t* hidden, int padded_rows, int valid_rows,
                         const int8_t* weights, const float* hidden_scales,
                         float weight_scale, const int* token_ids,
-                        const float* mixtures, bool shared, const float* x,
-                        float* y) {
+                        const float* mixtures, const int* topk_ranks,
+                        int shared_first_token, float* routed_output,
+                        bool shared, const float* x, float* y) {
     const int row_tiles = padded_rows / S3_TILE_ROWS;
     constexpr int output_blocks = S3_D_MODEL / 16;
     constexpr int reduction_blocks = S3_D_FF / S3_TILE_BYTES;
@@ -710,24 +715,29 @@ static void s3_amx_down(const int8_t* hidden, int padded_rows, int valid_rows,
                     const int row =
                         (first_row_tile + tile) * S3_TILE_ROWS + r;
                     if (row >= valid_rows) continue;
-                    const int token = shared ? row : token_ids[row];
+                    const int token =
+                        shared ? shared_first_token + row : token_ids[row];
                     float scale = hidden_scales[row] * weight_scale;
                     if (!shared) scale *= mixtures[row];
                     const __m512 result = _mm512_mul_ps(
                         _mm512_cvtepi32_ps(_mm512_load_si512(
                             (const __m512i*)tile_output[tile][r])),
                         _mm512_set1_ps(scale));
-                    float* output = y + (size_t)token * S3_D_MODEL + ob * 16;
                     if (shared) {
+                        float* output =
+                            y + (size_t)token * S3_D_MODEL + ob * 16;
                         const float* residual =
                             x + (size_t)token * S3_D_MODEL + ob * 16;
                         _mm512_storeu_ps(
                             output,
                             _mm512_add_ps(_mm512_loadu_ps(residual), result));
                     } else {
-                        _mm512_storeu_ps(
-                            output,
-                            _mm512_add_ps(_mm512_loadu_ps(output), result));
+                        float* output =
+                            routed_output +
+                            ((size_t)topk_ranks[row] * S3_NUM_TOKENS + token) *
+                                S3_D_MODEL +
+                            ob * 16;
+                        _mm512_storeu_ps(output, result);
                     }
                 }
             }
@@ -1348,7 +1358,13 @@ static S2WorkerPool& s2_worker_pool() {
 
 static void start_s2_worker_pool() { s2_worker_pool().start(); }
 
-constexpr int S1_MAX_BACKGROUND_WORKERS = MAX_TOP_K;
+constexpr int S1_ACTIVE_BACKGROUND_WORKERS = MAX_TOP_K;
+constexpr int S13_BACKGROUND_WORKERS = S3_THREADS - 1;
+
+#if defined(__AMX_TILE__) && defined(__AMX_INT8__)
+struct S3WorkContext;
+static void s3_execute_worker(int thread, S3WorkContext& work);
+#endif
 
 struct alignas(64) S1WorkerTask {
     int slot;
@@ -1368,26 +1384,23 @@ class S1WorkerPool {
    public:
     ~S1WorkerPool() {
         stop.store(true, std::memory_order_release);
+        pthread_mutex_lock(&extra_mutex);
+        s3_enabled = true;
+        pthread_cond_broadcast(&extra_condition);
+        pthread_mutex_unlock(&extra_mutex);
         generation.fetch_add(1, std::memory_order_release);
         for (int i = 0; i < worker_count; i++) {
             if (workers[i].joinable()) workers[i].join();
         }
+        pthread_cond_destroy(&extra_condition);
+        pthread_mutex_destroy(&extra_mutex);
     }
 
     void start() {
         if (started) return;
         started = true;
 
-        int max_threads = S1_MAX_BACKGROUND_WORKERS + 1;
-        if (const char* value = std::getenv("OMP_NUM_THREADS")) {
-            const long configured = std::strtol(value, nullptr, 10);
-            if (configured > 0) max_threads = (int)configured;
-        }
-        worker_count = max_threads - 1;
-        if (worker_count < 0) worker_count = 0;
-        if (worker_count > S1_MAX_BACKGROUND_WORKERS) {
-            worker_count = S1_MAX_BACKGROUND_WORKERS;
-        }
+        worker_count = S13_BACKGROUND_WORKERS;
 
         for (int i = 0; i < worker_count; i++) {
             workers[i] = std::thread(&S1WorkerPool::worker_loop, this, i);
@@ -1400,7 +1413,7 @@ class S1WorkerPool {
 #endif
     }
 
-    int size() const { return worker_count; }
+    int size() const { return S1_ACTIVE_BACKGROUND_WORKERS; }
 
     void set_task(int worker, int slot, float s_gate, float s_up,
                   float s_down, const uint8_t* xq_shifted, float s_x,
@@ -1409,13 +1422,14 @@ class S1WorkerPool {
     }
 
     uint64_t launch() {
+        mode = Mode::S1;
         const uint64_t current = ++next_generation;
         generation.store(current, std::memory_order_release);
         return current;
     }
 
     void wait(uint64_t current) const {
-        for (int i = 0; i < worker_count; i++) {
+        for (int i = 0; i < S1_ACTIVE_BACKGROUND_WORKERS; i++) {
             while (completed[i].generation.load(std::memory_order_acquire) !=
                    current) {
                 _mm_pause();
@@ -1423,7 +1437,35 @@ class S1WorkerPool {
         }
     }
 
+#if defined(__AMX_TILE__) && defined(__AMX_INT8__)
+    void run_s3(S3WorkContext& work) {
+        enable_s3_workers();
+        s3_context = &work;
+        mode = Mode::S3;
+        const uint64_t current = ++next_generation;
+        generation.store(current, std::memory_order_release);
+        s3_execute_worker(0, work);
+        for (int i = 0; i < worker_count; i++) {
+            while (completed[i].generation.load(std::memory_order_acquire) !=
+                   current) {
+                _mm_pause();
+            }
+        }
+    }
+#endif
+
    private:
+    enum class Mode { S1, S3 };
+
+    void enable_s3_workers() {
+        pthread_mutex_lock(&extra_mutex);
+        if (!s3_enabled) {
+            s3_enabled = true;
+            pthread_cond_broadcast(&extra_condition);
+        }
+        pthread_mutex_unlock(&extra_mutex);
+    }
+
 #ifdef _OPENMP
     static void pin_to_place(pthread_t thread, int place) {
         const int cpu_count = omp_get_place_num_procs(place);
@@ -1455,6 +1497,15 @@ class S1WorkerPool {
         uint64_t observed = generation.load(std::memory_order_acquire);
         ready.fetch_add(1, std::memory_order_release);
 
+        if (worker >= S1_ACTIVE_BACKGROUND_WORKERS) {
+            pthread_mutex_lock(&extra_mutex);
+            while (!s3_enabled && !stop.load(std::memory_order_acquire)) {
+                pthread_cond_wait(&extra_condition, &extra_mutex);
+            }
+            pthread_mutex_unlock(&extra_mutex);
+            if (stop.load(std::memory_order_acquire)) return;
+        }
+
         while (!stop.load(std::memory_order_acquire)) {
             uint64_t current;
             do {
@@ -1464,22 +1515,38 @@ class S1WorkerPool {
             } while (current == observed);
 
             observed = current;
-            const S1WorkerTask task = tasks[worker];
-            s1_expert_ffn(task.slot, task.s_gate, task.s_up, task.s_down,
-                          task.xq_shifted, task.s_x, task.out);
+            if (mode == Mode::S1) {
+                if (worker < S1_ACTIVE_BACKGROUND_WORKERS) {
+                    const S1WorkerTask task = tasks[worker];
+                    s1_expert_ffn(task.slot, task.s_gate, task.s_up,
+                                  task.s_down, task.xq_shifted, task.s_x,
+                                  task.out);
+                }
+#if defined(__AMX_TILE__) && defined(__AMX_INT8__)
+            } else {
+                s3_execute_worker(worker + 1, *s3_context);
+#endif
+            }
             completed[worker].generation.store(current,
                                                std::memory_order_release);
         }
     }
 
-    alignas(64) S1WorkerTask tasks[S1_MAX_BACKGROUND_WORKERS];
-    S1WorkerCompletion completed[S1_MAX_BACKGROUND_WORKERS];
-    std::thread workers[S1_MAX_BACKGROUND_WORKERS];
+    alignas(64) S1WorkerTask tasks[S1_ACTIVE_BACKGROUND_WORKERS];
+    S1WorkerCompletion completed[S13_BACKGROUND_WORKERS];
+    std::thread workers[S13_BACKGROUND_WORKERS];
     alignas(64) std::atomic<uint64_t> generation{0};
     alignas(64) std::atomic<int> ready{0};
     std::atomic<bool> stop{false};
+    pthread_mutex_t extra_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t extra_condition = PTHREAD_COND_INITIALIZER;
+#if defined(__AMX_TILE__) && defined(__AMX_INT8__)
+    S3WorkContext* s3_context = nullptr;
+#endif
     uint64_t next_generation = 0;
     int worker_count = 0;
+    Mode mode = Mode::S1;
+    bool s3_enabled = false;
     bool started = false;
 };
 
@@ -1738,10 +1805,66 @@ static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
 
 #if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
     defined(__AMX_TILE__) && defined(__AMX_INT8__)
+struct S3Task {
+    int slot;
+    int input_row;
+    int valid_rows;
+    int padded_rows;
+    int expert;
+    int shared_first_token;
+    int tile_count;
+    int cost;
+    bool shared;
+};
+
+struct alignas(64) S3WorkContext {
+    const float* x;
+    const MoEWeights* weights;
+    float* y;
+
+    alignas(64) float affinities[S3_NUM_TOKENS][S3_NUM_EXPERTS];
+    alignas(64) int8_t xq[S3_NUM_TOKENS][S3_D_MODEL];
+    alignas(64) float input_scales[S3_NUM_TOKENS];
+    int selected_experts[S3_NUM_TOKENS][S3_TOP_K];
+    float selected_mixtures[S3_NUM_TOKENS][S3_TOP_K];
+
+    alignas(64) int local_counts[S3_THREADS][S3_NUM_EXPERTS];
+    alignas(64) int thread_offsets[S3_THREADS][S3_NUM_EXPERTS];
+    int expert_counts[S3_NUM_EXPERTS];
+    int expert_offsets[S3_NUM_EXPERTS + 1];
+
+    alignas(64) int8_t grouped_xq[S3_MAX_GROUPED_ROWS][S3_D_MODEL];
+    alignas(64) float grouped_scales[S3_MAX_GROUPED_ROWS];
+    alignas(64) int grouped_tokens[S3_MAX_GROUPED_ROWS];
+    alignas(64) int grouped_ranks[S3_MAX_GROUPED_ROWS];
+    alignas(64) float grouped_mixtures[S3_MAX_GROUPED_ROWS];
+
+    alignas(64)
+        float routed_output[S3_TOP_K][S3_NUM_TOKENS][S3_D_MODEL];
+
+    S3Task tasks[S3_MAX_TASKS];
+    int task_count;
+    int thread_task_count[S3_THREADS];
+    int thread_tasks[S3_THREADS][S3_MAX_TASKS];
+
+    alignas(64) std::atomic<int> route_arrived{0};
+    alignas(64) std::atomic<int> offsets_ready{0};
+    alignas(64) std::atomic<int> scatter_arrived{0};
+    alignas(64) std::atomic<int> expert_arrived{0};
+};
+
+static inline void s3_barrier(std::atomic<int>& arrived) {
+    arrived.fetch_add(1, std::memory_order_acq_rel);
+    while (arrived.load(std::memory_order_acquire) != S3_THREADS) {
+        _mm_pause();
+    }
+}
+
 static void s3_execute_expert(
     int slot, const int8_t* input, int padded_rows, int valid_rows,
     const float* input_scales, float gate_scale, float up_scale,
     float down_scale, const int* token_ids, const float* mixtures,
+    const int* topk_ranks, int shared_first_token, float* routed_output,
     bool shared, const float* x, float* y) {
     alignas(64)
         int32_t gate_acc[S3_NUM_TOKENS * S3_D_FF];
@@ -1792,7 +1915,209 @@ static void s3_execute_expert(
     }
 
     s3_amx_down(hidden_q, padded_rows, valid_rows, down, hidden_scales,
-                down_scale, token_ids, mixtures, shared, x, y);
+                down_scale, token_ids, mixtures, topk_ranks,
+                shared_first_token, routed_output, shared, x, y);
+}
+
+static void s3_build_tasks(S3WorkContext& work) {
+    work.task_count = 0;
+    auto add_expert = [&](int slot, int expert, int input_row, int rows,
+                          bool shared) {
+        if (rows == 0) return;
+        const int total_tiles =
+            (rows + S3_TILE_ROWS - 1) / S3_TILE_ROWS;
+        const int rounds =
+            (total_tiles + S3_C_TILES - 1) / S3_C_TILES;
+        const int tiles_per_round = total_tiles / rounds;
+        const int extra_tiles = total_tiles % rounds;
+        int first_row = 0;
+        for (int round = 0; round < rounds; round++) {
+            const int tile_count =
+                tiles_per_round + (round < extra_tiles ? 1 : 0);
+            const int padded_rows = tile_count * S3_TILE_ROWS;
+            const int valid_rows = std::min(rows - first_row, padded_rows);
+            S3Task& task = work.tasks[work.task_count++];
+            task.slot = slot;
+            task.input_row = input_row + first_row;
+            task.valid_rows = valid_rows;
+            task.padded_rows = padded_rows;
+            task.expert = expert;
+            task.shared_first_token = shared ? first_row : 0;
+            task.tile_count = tile_count;
+            task.cost = 256 * (tile_count + 1) + valid_rows * 8;
+            task.shared = shared;
+            first_row += valid_rows;
+        }
+    };
+
+    add_expert(0, -1, 0, S3_NUM_TOKENS, true);
+    for (int expert = 0; expert < S3_NUM_EXPERTS; expert++) {
+        add_expert(expert + 1, expert, work.expert_offsets[expert],
+                   work.expert_counts[expert], false);
+    }
+
+    std::sort(work.tasks, work.tasks + work.task_count,
+              [](const S3Task& first, const S3Task& second) {
+                  return first.cost > second.cost;
+              });
+    int thread_cost[S3_THREADS] = {};
+    std::memset(work.thread_task_count, 0, sizeof(work.thread_task_count));
+    for (int task = 0; task < work.task_count; task++) {
+        int best_thread = 0;
+        for (int thread = 1; thread < S3_THREADS; thread++) {
+            if (thread_cost[thread] < thread_cost[best_thread]) {
+                best_thread = thread;
+            }
+        }
+        const int index = work.thread_task_count[best_thread]++;
+        work.thread_tasks[best_thread][index] = task;
+        thread_cost[best_thread] += work.tasks[task].cost;
+    }
+}
+
+static void s3_execute_worker(int thread, S3WorkContext& work) {
+    const MoEWeights& w = *work.weights;
+    int* local_counts = work.local_counts[thread];
+    std::memset(local_counts, 0, S3_NUM_EXPERTS * sizeof(int));
+
+    const __m512 bias = _mm512_loadu_ps(w.bias);
+    const __m512 negative_infinity = _mm512_set1_ps(-3.402823466e+38F);
+    constexpr int router_blocks = S3_NUM_TOKENS / 4;
+    for (int block = thread; block < router_blocks; block += S3_THREADS) {
+        const int first_token = block * 4;
+        s3_router_four(work.x + (size_t)first_token * S3_D_MODEL,
+                       work.affinities[first_token]);
+        for (int lane = 0; lane < 4; lane++) {
+            const int token = first_token + lane;
+            const __m512 affinity = _mm512_load_ps(work.affinities[token]);
+            const __m512 selection_scores = _mm512_add_ps(affinity, bias);
+            __mmask16 available = 0xffff;
+            for (int k = 0; k < S3_TOP_K; k++) {
+                const __m512 candidates = _mm512_mask_mov_ps(
+                    negative_infinity, available, selection_scores);
+                const float best_score = _mm512_reduce_max_ps(candidates);
+                const __mmask16 matches =
+                    available &
+                    _mm512_cmp_ps_mask(candidates,
+                                       _mm512_set1_ps(best_score), _CMP_EQ_OQ);
+                const int expert = __builtin_ctz((unsigned)matches);
+                work.selected_experts[token][k] = expert;
+                local_counts[expert]++;
+                available = (__mmask16)(
+                    available & (__mmask16)~(1u << expert));
+            }
+
+            float gate_sum = 0.0f;
+            for (int k = 0; k < S3_TOP_K; k++) {
+                gate_sum +=
+                    work.affinities[token][work.selected_experts[token][k]];
+            }
+            for (int k = 0; k < S3_TOP_K; k++) {
+                work.selected_mixtures[token][k] =
+                    work.affinities[token]
+                                   [work.selected_experts[token][k]] /
+                    gate_sum;
+            }
+            work.input_scales[token] = quantize_s3_s8(
+                work.x + (size_t)token * S3_D_MODEL, S3_D_MODEL,
+                work.xq[token]);
+        }
+    }
+
+    s3_barrier(work.route_arrived);
+    if (thread == 0) {
+        int grouped_row = 0;
+        for (int expert = 0; expert < S3_NUM_EXPERTS; expert++) {
+            work.expert_offsets[expert] = grouped_row;
+            int count = 0;
+            for (int owner = 0; owner < S3_THREADS; owner++) {
+                work.thread_offsets[owner][expert] = grouped_row + count;
+                count += work.local_counts[owner][expert];
+            }
+            work.expert_counts[expert] = count;
+            const int padded_count =
+                (count + S3_TILE_ROWS - 1) & -S3_TILE_ROWS;
+            if (padded_count > count) {
+                std::memset(work.grouped_xq[grouped_row + count], 0,
+                            (size_t)(padded_count - count) * S3_D_MODEL);
+            }
+            grouped_row += padded_count;
+        }
+        work.expert_offsets[S3_NUM_EXPERTS] = grouped_row;
+        s3_build_tasks(work);
+        work.offsets_ready.store(1, std::memory_order_release);
+    } else {
+        while (work.offsets_ready.load(std::memory_order_acquire) == 0) {
+            _mm_pause();
+        }
+    }
+
+    int cursor[S3_NUM_EXPERTS];
+    std::memcpy(cursor, work.thread_offsets[thread], sizeof(cursor));
+    for (int block = thread; block < router_blocks; block += S3_THREADS) {
+        const int first_token = block * 4;
+        for (int lane = 0; lane < 4; lane++) {
+            const int token = first_token + lane;
+            for (int k = 0; k < S3_TOP_K; k++) {
+                const int expert = work.selected_experts[token][k];
+                const int row = cursor[expert]++;
+                std::memcpy(work.grouped_xq[row], work.xq[token],
+                            S3_D_MODEL);
+                work.grouped_scales[row] = work.input_scales[token];
+                work.grouped_tokens[row] = token;
+                work.grouped_ranks[row] = k;
+                work.grouped_mixtures[row] =
+                    work.selected_mixtures[token][k];
+            }
+        }
+    }
+    s3_barrier(work.scatter_arrived);
+
+    static thread_local bool amx_ready = request_s3_amx_permission();
+    if (!amx_ready) std::abort();
+    _tile_loadconfig(&s3_tile_config);
+    for (int index = 0; index < work.thread_task_count[thread]; index++) {
+        const S3Task& task =
+            work.tasks[work.thread_tasks[thread][index]];
+        if (task.shared) {
+            s3_execute_expert(
+                0, work.xq[task.input_row], task.padded_rows,
+                task.valid_rows, work.input_scales + task.input_row,
+                w.sh_s_gate, w.sh_s_up, w.sh_s_down, nullptr, nullptr,
+                nullptr, task.shared_first_token,
+                &work.routed_output[0][0][0], true, work.x, work.y);
+        } else {
+            const int row = task.input_row;
+            const int expert = task.expert;
+            s3_execute_expert(
+                task.slot, work.grouped_xq[row], task.padded_rows,
+                task.valid_rows, work.grouped_scales + row,
+                w.s_gate[expert], w.s_up[expert], w.s_down[expert],
+                work.grouped_tokens + row, work.grouped_mixtures + row,
+                work.grouped_ranks + row, 0,
+                &work.routed_output[0][0][0], false, work.x, work.y);
+        }
+    }
+    _tile_release();
+
+    s3_barrier(work.expert_arrived);
+    for (int block = thread; block < router_blocks; block += S3_THREADS) {
+        const int first_token = block * 4;
+        for (int lane = 0; lane < 4; lane++) {
+            const int token = first_token + lane;
+            for (int d = 0; d < S3_D_MODEL; d += 16) {
+                __m512 output = _mm512_loadu_ps(
+                    work.y + (size_t)token * S3_D_MODEL + d);
+                for (int k = 0; k < S3_TOP_K; k++) {
+                    output = _mm512_add_ps(
+                        output,
+                        _mm512_load_ps(work.routed_output[k][token] + d));
+                }
+                _mm512_storeu_ps(
+                    work.y + (size_t)token * S3_D_MODEL + d, output);
+            }
+        }
+    }
 }
 #endif
 
@@ -1805,105 +2130,13 @@ static void moe_forward_optimized_s3(const float* x, const MoEWeights& w,
         return;
     }
 
-    alignas(64)
-        float affinities[S3_NUM_TOKENS][S3_NUM_EXPERTS];
-    alignas(64) int8_t xq[S3_NUM_TOKENS][S3_D_MODEL];
-    alignas(64) float input_scales[S3_NUM_TOKENS];
-    int selected_experts[S3_NUM_TOKENS][S3_TOP_K];
-    float selected_mixtures[S3_NUM_TOKENS][S3_TOP_K];
-    int expert_counts[S3_NUM_EXPERTS] = {};
+    S3WorkContext work;
+    work.x = x;
+    work.weights = &w;
+    work.y = y;
+    s1_worker_pool().run_s3(work);
+    return;
 
-    for (int first_token = 0; first_token < S3_NUM_TOKENS;
-         first_token += 4) {
-        s3_router_four(x + (size_t)first_token * S3_D_MODEL,
-                       affinities[first_token]);
-    }
-
-    const __m512 bias = _mm512_loadu_ps(w.bias);
-    const __m512 negative_infinity = _mm512_set1_ps(-3.402823466e+38F);
-    for (int token = 0; token < S3_NUM_TOKENS; token++) {
-        const __m512 affinity = _mm512_load_ps(affinities[token]);
-        const __m512 selection_scores = _mm512_add_ps(affinity, bias);
-        __mmask16 available = 0xffff;
-        for (int k = 0; k < S3_TOP_K; k++) {
-            const __m512 candidates = _mm512_mask_mov_ps(
-                negative_infinity, available, selection_scores);
-            const float best_score = _mm512_reduce_max_ps(candidates);
-            const __mmask16 matches =
-                available &
-                _mm512_cmp_ps_mask(candidates,
-                                   _mm512_set1_ps(best_score), _CMP_EQ_OQ);
-            const int expert = __builtin_ctz((unsigned)matches);
-            selected_experts[token][k] = expert;
-            expert_counts[expert]++;
-            available = (__mmask16)(
-                available & (__mmask16)~(1u << expert));
-        }
-
-        float gate_sum = 0.0f;
-        for (int k = 0; k < S3_TOP_K; k++) {
-            gate_sum += affinities[token][selected_experts[token][k]];
-        }
-        for (int k = 0; k < S3_TOP_K; k++) {
-            selected_mixtures[token][k] =
-                affinities[token][selected_experts[token][k]] / gate_sum;
-        }
-        input_scales[token] = quantize_s3_s8(
-            x + (size_t)token * S3_D_MODEL, S3_D_MODEL, xq[token]);
-    }
-
-    int expert_offsets[S3_NUM_EXPERTS + 1] = {};
-    int cursor[S3_NUM_EXPERTS];
-    for (int expert = 0; expert < S3_NUM_EXPERTS; expert++) {
-        expert_offsets[expert + 1] =
-            expert_offsets[expert] + expert_counts[expert];
-        cursor[expert] = expert_offsets[expert];
-    }
-
-    int routed_tokens[S3_ROUTED_ASSIGNMENTS];
-    float routed_mixtures[S3_ROUTED_ASSIGNMENTS];
-    for (int token = 0; token < S3_NUM_TOKENS; token++) {
-        for (int k = 0; k < S3_TOP_K; k++) {
-            const int expert = selected_experts[token][k];
-            const int position = cursor[expert]++;
-            routed_tokens[position] = token;
-            routed_mixtures[position] = selected_mixtures[token][k];
-        }
-    }
-
-    _tile_loadconfig(&s3_tile_config);
-    s3_execute_expert(0, xq[0], S3_NUM_TOKENS, S3_NUM_TOKENS,
-                      input_scales, w.sh_s_gate, w.sh_s_up, w.sh_s_down,
-                      nullptr, nullptr, true, x, y);
-
-    alignas(64) int8_t grouped_xq[S3_NUM_TOKENS][S3_D_MODEL];
-    alignas(64) float grouped_scales[S3_NUM_TOKENS];
-    alignas(64) int grouped_tokens[S3_NUM_TOKENS];
-    alignas(64) float grouped_mixtures[S3_NUM_TOKENS];
-    for (int expert = 0; expert < S3_NUM_EXPERTS; expert++) {
-        const int valid_rows = expert_counts[expert];
-        if (valid_rows == 0) continue;
-        const int padded_rows =
-            (valid_rows + S3_TILE_ROWS - 1) & -S3_TILE_ROWS;
-        const int offset = expert_offsets[expert];
-        for (int row = 0; row < valid_rows; row++) {
-            const int token = routed_tokens[offset + row];
-            std::memcpy(grouped_xq[row], xq[token], S3_D_MODEL);
-            grouped_scales[row] = input_scales[token];
-            grouped_tokens[row] = token;
-            grouped_mixtures[row] = routed_mixtures[offset + row];
-        }
-        if (padded_rows > valid_rows) {
-            std::memset(grouped_xq[valid_rows], 0,
-                        (size_t)(padded_rows - valid_rows) * S3_D_MODEL);
-        }
-
-        s3_execute_expert(
-            expert + 1, grouped_xq[0], padded_rows, valid_rows,
-            grouped_scales, w.s_gate[expert], w.s_up[expert],
-            w.s_down[expert], grouped_tokens, grouped_mixtures, false, x, y);
-    }
-    _tile_release();
 #else
     moe_forward_generic(x, w, y, num_tokens);
 #endif
