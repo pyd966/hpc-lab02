@@ -1,0 +1,832 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      The system is: Linux - 6.6.63 - riscv64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: /usr/bin/cc 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is GNU, found in:
+        /home/h3250106394/lab02/build-riscv/CMakeFiles/3.31.6/CompilerIdC/a.out
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/c++ 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is GNU, found in:
+        /home/h3250106394/lab02/build-riscv/CMakeFiles/3.31.6/CompilerIdCXX/a.out
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId"
+      binary: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_0f123/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_0f123.dir/build.make CMakeFiles/cmTC_0f123.dir/build
+        gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId'
+        Building C object CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o
+        /usr/bin/cc   -v -o CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        Target: riscv64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-19) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o' '-c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_0f123.dir/'
+         /usr/libexec/gcc/riscv64-linux-gnu/14/cc1 -quiet -v -imultilib . -imultiarch riscv64-linux-gnu /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_0f123.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -mtls-dialect=trad -march=rv64imafdc_zicsr_zifencei -version -o /tmp/cc0nDai4.s
+        GNU C17 (Debian 14.2.0-19) version 14.2.0 (riscv64-linux-gnu)
+        	compiled by GNU C version 14.2.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.27-GMP
+        
+        warning: MPFR header version 4.2.1 differs from library version 4.2.2.
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring nonexistent directory "/usr/local/include/riscv64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed/riscv64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/../../../../riscv64-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/lib/gcc/riscv64-linux-gnu/14/include
+         /usr/local/include
+         /usr/include/riscv64-linux-gnu
+         /usr/include
+        End of search list.
+        Compiler executable checksum: 02aeb9e39e99e6c1b454d50066314b85
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o' '-c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_0f123.dir/'
+         as -v --traditional-format -fpic -march=rv64imafdc_zicsr_zifencei -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -o CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o /tmp/cc0nDai4.s
+        GNU assembler version 2.44 (riscv64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44
+        COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o' '-c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.'
+        Linking C executable cmTC_0f123
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0f123.dir/link.txt --verbose=1
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper
+        Target: riscv64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-19) 
+        COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_0f123' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'cmTC_0f123.'
+         /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdLoChl.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_0f123 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o
+        collect2 version 14.2.0
+        /usr/bin/ld -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdLoChl.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_0f123 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o
+        GNU ld (GNU Binutils for Debian) 2.44
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_0f123' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'cmTC_0f123.'
+        /usr/bin/cc  -v -Wl,-v CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -o cmTC_0f123
+        gmake[1]: Leaving directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/lib/gcc/riscv64-linux-gnu/14/include]
+          add: [/usr/local/include]
+          add: [/usr/include/riscv64-linux-gnu]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/lib/gcc/riscv64-linux-gnu/14/include] ==> [/usr/lib/gcc/riscv64-linux-gnu/14/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include/riscv64-linux-gnu] ==> [/usr/include/riscv64-linux-gnu]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/lib/gcc/riscv64-linux-gnu/14/include;/usr/local/include;/usr/include/riscv64-linux-gnu;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_0f123/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_0f123.dir/build.make CMakeFiles/cmTC_0f123.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-SO7mId']
+        ignore line: [Building C object CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/usr/bin/cc   -v -o CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [Target: riscv64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-19) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o' '-c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_0f123.dir/']
+        ignore line: [ /usr/libexec/gcc/riscv64-linux-gnu/14/cc1 -quiet -v -imultilib . -imultiarch riscv64-linux-gnu /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_0f123.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -mtls-dialect=trad -march=rv64imafdc_zicsr_zifencei -version -o /tmp/cc0nDai4.s]
+        ignore line: [GNU C17 (Debian 14.2.0-19) version 14.2.0 (riscv64-linux-gnu)]
+        ignore line: [	compiled by GNU C version 14.2.0  GMP version 6.3.0  MPFR version 4.2.1  MPC version 1.3.1  isl version isl-0.27-GMP]
+        ignore line: []
+        ignore line: [warning: MPFR header version 4.2.1 differs from library version 4.2.2.]
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring nonexistent directory "/usr/local/include/riscv64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed/riscv64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/../../../../riscv64-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/lib/gcc/riscv64-linux-gnu/14/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include/riscv64-linux-gnu]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: 02aeb9e39e99e6c1b454d50066314b85]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o' '-c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_0f123.dir/']
+        ignore line: [ as -v --traditional-format -fpic -march=rv64imafdc_zicsr_zifencei -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -o CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o /tmp/cc0nDai4.s]
+        ignore line: [GNU assembler version 2.44 (riscv64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o' '-c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.']
+        ignore line: [Linking C executable cmTC_0f123]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0f123.dir/link.txt --verbose=1]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper]
+        ignore line: [Target: riscv64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-19) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_0f123' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'cmTC_0f123.']
+        link line: [ /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdLoChl.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_0f123 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccdLoChl.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-melf64lriscv] ==> ignore
+          arg [-X] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib/ld-linux-riscv64-lp64d.so.1] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_0f123] ==> ignore
+          arg [/lib/riscv64-linux-gnu/Scrt1.o] ==> obj [/lib/riscv64-linux-gnu/Scrt1.o]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crti.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crti.o]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o]
+          arg [-L/usr/lib/gcc/riscv64-linux-gnu/14] ==> dir [/usr/lib/gcc/riscv64-linux-gnu/14]
+          arg [-L/lib/riscv64-linux-gnu] ==> dir [/lib/riscv64-linux-gnu]
+          arg [-L/usr/lib/riscv64-linux-gnu] ==> dir [/usr/lib/riscv64-linux-gnu]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o] ==> ignore
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [-lc] ==> lib [c]
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crtn.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+        ignore line: [collect2 version 14.2.0]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdLoChl.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_0f123 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_0f123.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+        linker tool for 'C': /usr/bin/ld
+        collapse library dir [/usr/lib/gcc/riscv64-linux-gnu/14] ==> [/usr/lib/gcc/riscv64-linux-gnu/14]
+        collapse library dir [/lib/riscv64-linux-gnu] ==> [/lib/riscv64-linux-gnu]
+        collapse library dir [/usr/lib/riscv64-linux-gnu] ==> [/usr/lib/riscv64-linux-gnu]
+        implicit libs: [gcc;gcc_s;c;gcc;gcc_s]
+        implicit objs: [/lib/riscv64-linux-gnu/Scrt1.o;/usr/lib/gcc/riscv64-linux-gnu/14/crti.o;/usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o;/usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o;/usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+        implicit dirs: [/usr/lib/gcc/riscv64-linux-gnu/14;/lib/riscv64-linux-gnu;/usr/lib/riscv64-linux-gnu]
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CMakeDetermineLinkerId.cmake:40 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:255 (cmake_determine_linker_id)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Running the C compiler's linker: "/usr/bin/ld" "-v"
+      GNU ld (GNU Binutils for Debian) 2.44
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6"
+      binary: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b5a72/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_b5a72.dir/build.make CMakeFiles/cmTC_b5a72.dir/build
+        gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6'
+        Building CXX object CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/c++   -v -o CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        Target: riscv64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-19) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_b5a72.dir/'
+         /usr/libexec/gcc/riscv64-linux-gnu/14/cc1plus -quiet -v -imultilib . -imultiarch riscv64-linux-gnu -D_GNU_SOURCE /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_b5a72.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -mtls-dialect=trad -march=rv64imafdc_zicsr_zifencei -version -o /tmp/ccbkquLA.s
+        GNU C++17 (Debian 14.2.0-19) version 14.2.0 (riscv64-linux-gnu)
+        	compiled by GNU C version 14.2.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.27-GMP
+        
+        warning: MPFR header version 4.2.1 differs from library version 4.2.2.
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring duplicate directory "/usr/include/riscv64-linux-gnu/c++/14"
+        ignoring nonexistent directory "/usr/local/include/riscv64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed/riscv64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/../../../../riscv64-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/include/c++/14
+         /usr/include/riscv64-linux-gnu/c++/14
+         /usr/include/c++/14/backward
+         /usr/lib/gcc/riscv64-linux-gnu/14/include
+         /usr/local/include
+         /usr/include/riscv64-linux-gnu
+         /usr/include
+        End of search list.
+        Compiler executable checksum: a7751e06dea970bad39a86c6c3767cf7
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_b5a72.dir/'
+         as -v --traditional-format -fpic -march=rv64imafdc_zicsr_zifencei -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -o CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccbkquLA.s
+        GNU assembler version 2.44 (riscv64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44
+        COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.'
+        Linking CXX executable cmTC_b5a72
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b5a72.dir/link.txt --verbose=1
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper
+        Target: riscv64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-19) 
+        COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_b5a72' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'cmTC_b5a72.'
+         /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccagrwex.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_b5a72 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o
+        collect2 version 14.2.0
+        /usr/bin/ld -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccagrwex.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_b5a72 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o
+        GNU ld (GNU Binutils for Debian) 2.44
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_b5a72' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'cmTC_b5a72.'
+        /usr/bin/c++  -v -Wl,-v CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_b5a72
+        gmake[1]: Leaving directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/include/c++/14]
+          add: [/usr/include/riscv64-linux-gnu/c++/14]
+          add: [/usr/include/c++/14/backward]
+          add: [/usr/lib/gcc/riscv64-linux-gnu/14/include]
+          add: [/usr/local/include]
+          add: [/usr/include/riscv64-linux-gnu]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/include/c++/14] ==> [/usr/include/c++/14]
+        collapse include dir [/usr/include/riscv64-linux-gnu/c++/14] ==> [/usr/include/riscv64-linux-gnu/c++/14]
+        collapse include dir [/usr/include/c++/14/backward] ==> [/usr/include/c++/14/backward]
+        collapse include dir [/usr/lib/gcc/riscv64-linux-gnu/14/include] ==> [/usr/lib/gcc/riscv64-linux-gnu/14/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include/riscv64-linux-gnu] ==> [/usr/include/riscv64-linux-gnu]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/include/c++/14;/usr/include/riscv64-linux-gnu/c++/14;/usr/include/c++/14/backward;/usr/lib/gcc/riscv64-linux-gnu/14/include;/usr/local/include;/usr/include/riscv64-linux-gnu;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b5a72/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_b5a72.dir/build.make CMakeFiles/cmTC_b5a72.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-FiMXP6']
+        ignore line: [Building CXX object CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [Target: riscv64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-19) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_b5a72.dir/']
+        ignore line: [ /usr/libexec/gcc/riscv64-linux-gnu/14/cc1plus -quiet -v -imultilib . -imultiarch riscv64-linux-gnu -D_GNU_SOURCE /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_b5a72.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -mtls-dialect=trad -march=rv64imafdc_zicsr_zifencei -version -o /tmp/ccbkquLA.s]
+        ignore line: [GNU C++17 (Debian 14.2.0-19) version 14.2.0 (riscv64-linux-gnu)]
+        ignore line: [	compiled by GNU C version 14.2.0  GMP version 6.3.0  MPFR version 4.2.1  MPC version 1.3.1  isl version isl-0.27-GMP]
+        ignore line: []
+        ignore line: [warning: MPFR header version 4.2.1 differs from library version 4.2.2.]
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring duplicate directory "/usr/include/riscv64-linux-gnu/c++/14"]
+        ignore line: [ignoring nonexistent directory "/usr/local/include/riscv64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed/riscv64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/riscv64-linux-gnu/14/../../../../riscv64-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/include/c++/14]
+        ignore line: [ /usr/include/riscv64-linux-gnu/c++/14]
+        ignore line: [ /usr/include/c++/14/backward]
+        ignore line: [ /usr/lib/gcc/riscv64-linux-gnu/14/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include/riscv64-linux-gnu]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: a7751e06dea970bad39a86c6c3767cf7]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_b5a72.dir/']
+        ignore line: [ as -v --traditional-format -fpic -march=rv64imafdc_zicsr_zifencei -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -misa-spec=20191213 -o CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccbkquLA.s]
+        ignore line: [GNU assembler version 2.44 (riscv64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.']
+        ignore line: [Linking CXX executable cmTC_b5a72]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b5a72.dir/link.txt --verbose=1]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper]
+        ignore line: [Target: riscv64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-19) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_b5a72' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-dumpdir' 'cmTC_b5a72.']
+        link line: [ /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccagrwex.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_b5a72 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccagrwex.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-melf64lriscv] ==> ignore
+          arg [-X] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib/ld-linux-riscv64-lp64d.so.1] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_b5a72] ==> ignore
+          arg [/lib/riscv64-linux-gnu/Scrt1.o] ==> obj [/lib/riscv64-linux-gnu/Scrt1.o]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crti.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crti.o]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o]
+          arg [-L/usr/lib/gcc/riscv64-linux-gnu/14] ==> dir [/usr/lib/gcc/riscv64-linux-gnu/14]
+          arg [-L/lib/riscv64-linux-gnu] ==> dir [/lib/riscv64-linux-gnu]
+          arg [-L/usr/lib/riscv64-linux-gnu] ==> dir [/usr/lib/riscv64-linux-gnu]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [-lstdc++] ==> lib [stdc++]
+          arg [-lm] ==> lib [m]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o]
+          arg [/usr/lib/gcc/riscv64-linux-gnu/14/crtn.o] ==> obj [/usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+        ignore line: [collect2 version 14.2.0]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccagrwex.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_b5a72 /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu -v CMakeFiles/cmTC_b5a72.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+        linker tool for 'CXX': /usr/bin/ld
+        collapse library dir [/usr/lib/gcc/riscv64-linux-gnu/14] ==> [/usr/lib/gcc/riscv64-linux-gnu/14]
+        collapse library dir [/lib/riscv64-linux-gnu] ==> [/lib/riscv64-linux-gnu]
+        collapse library dir [/usr/lib/riscv64-linux-gnu] ==> [/usr/lib/riscv64-linux-gnu]
+        implicit libs: [stdc++;m;gcc_s;gcc;c;gcc_s;gcc]
+        implicit objs: [/lib/riscv64-linux-gnu/Scrt1.o;/usr/lib/gcc/riscv64-linux-gnu/14/crti.o;/usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o;/usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o;/usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+        implicit dirs: [/usr/lib/gcc/riscv64-linux-gnu/14;/lib/riscv64-linux-gnu;/usr/lib/riscv64-linux-gnu]
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CMakeDetermineLinkerId.cmake:40 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:255 (cmake_determine_linker_id)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Running the CXX compiler's linker: "/usr/bin/ld" "-v"
+      GNU ld (GNU Binutils for Debian) 2.44
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:252 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:522 (_OPENMP_GET_FLAGS)"
+      - "CMakeLists.txt:28 (find_package)"
+    description: "Detecting C OpenMP compiler info"
+    directories:
+      source: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh"
+      binary: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "OpenMP_COMPILE_RESULT_C_fopenmp"
+      cached: true
+      stdout: |
+        Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_c837c/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_c837c.dir/build.make CMakeFiles/cmTC_c837c.dir/build
+        gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh'
+        Building C object CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o
+        /usr/bin/cc   -fopenmp -o CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o -c /home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh/OpenMPTryFlag.c
+        Linking C executable cmTC_c837c
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_c837c.dir/link.txt --verbose=1
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper
+        Target: riscv64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-19) 
+        COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/
+        Reading specs from /usr/lib/gcc/riscv64-linux-gnu/14/libgomp.spec
+        COLLECT_GCC_OPTIONS='-fopenmp' '-v' '-o' 'cmTC_c837c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-pthread' '-dumpdir' 'cmTC_c837c.'
+         /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccDZsntK.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lpthread -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_c837c /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o -lgomp -lgcc --push-state --as-needed -lgcc_s --pop-state -lpthread -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o
+        COLLECT_GCC_OPTIONS='-fopenmp' '-v' '-o' 'cmTC_c837c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-pthread' '-dumpdir' 'cmTC_c837c.'
+        /usr/bin/cc  -fopenmp -v CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o -o cmTC_c837c
+        gmake[1]: Leaving directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:296 (message)"
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:522 (_OPENMP_GET_FLAGS)"
+      - "CMakeLists.txt:28 (find_package)"
+    message: |
+      Parsed C OpenMP implicit link information from above output:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        ignore line: [Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_c837c/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_c837c.dir/build.make CMakeFiles/cmTC_c837c.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh']
+        ignore line: [Building C object CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o]
+        ignore line: [/usr/bin/cc   -fopenmp -o CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o -c /home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-OFqJLh/OpenMPTryFlag.c]
+        ignore line: [Linking C executable cmTC_c837c]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_c837c.dir/link.txt --verbose=1]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper]
+        ignore line: [Target: riscv64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-19) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/]
+        ignore line: [Reading specs from /usr/lib/gcc/riscv64-linux-gnu/14/libgomp.spec]
+        ignore line: [COLLECT_GCC_OPTIONS='-fopenmp' '-v' '-o' 'cmTC_c837c' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-pthread' '-dumpdir' 'cmTC_c837c.']
+        link line: [ /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccDZsntK.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lpthread -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_c837c /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o -lgomp -lgcc --push-state --as-needed -lgcc_s --pop-state -lpthread -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccDZsntK.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lpthread] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-melf64lriscv] ==> ignore
+          arg [-X] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib/ld-linux-riscv64-lp64d.so.1] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_c837c] ==> ignore
+          arg [-L/usr/lib/gcc/riscv64-linux-gnu/14] ==> dir [/usr/lib/gcc/riscv64-linux-gnu/14]
+          arg [-L/lib/riscv64-linux-gnu] ==> dir [/lib/riscv64-linux-gnu]
+          arg [-L/usr/lib/riscv64-linux-gnu] ==> dir [/usr/lib/riscv64-linux-gnu]
+          arg [CMakeFiles/cmTC_c837c.dir/OpenMPTryFlag.c.o] ==> ignore
+          arg [-lgomp] ==> lib [gomp]
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [-lpthread] ==> lib [pthread]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+        collapse library dir [/usr/lib/gcc/riscv64-linux-gnu/14] ==> [/usr/lib/gcc/riscv64-linux-gnu/14]
+        collapse library dir [/lib/riscv64-linux-gnu] ==> [/lib/riscv64-linux-gnu]
+        collapse library dir [/usr/lib/riscv64-linux-gnu] ==> [/usr/lib/riscv64-linux-gnu]
+        implicit libs: [gomp;gcc;gcc_s;pthread;c;gcc;gcc_s]
+        implicit objs: []
+        implicit dirs: [/usr/lib/gcc/riscv64-linux-gnu/14;/lib/riscv64-linux-gnu;/usr/lib/riscv64-linux-gnu]
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:252 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:522 (_OPENMP_GET_FLAGS)"
+      - "CMakeLists.txt:28 (find_package)"
+    description: "Detecting CXX OpenMP compiler info"
+    directories:
+      source: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU"
+      binary: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "OpenMP_COMPILE_RESULT_CXX_fopenmp"
+      cached: true
+      stdout: |
+        Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_1a8dd/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_1a8dd.dir/build.make CMakeFiles/cmTC_1a8dd.dir/build
+        gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU'
+        Building CXX object CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o
+        /usr/bin/c++   -fopenmp -std=gnu++17 -o CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o -c /home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU/OpenMPTryFlag.cpp
+        Linking CXX executable cmTC_1a8dd
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_1a8dd.dir/link.txt --verbose=1
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper
+        Target: riscv64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-19) 
+        COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/
+        Reading specs from /usr/lib/gcc/riscv64-linux-gnu/14/libgomp.spec
+        COLLECT_GCC_OPTIONS='-fopenmp' '-v' '-o' 'cmTC_1a8dd' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-pthread' '-dumpdir' 'cmTC_1a8dd.'
+         /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccvGz1RW.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lpthread -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_1a8dd /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o -lstdc++ -lm -lgomp -lgcc_s -lgcc -lpthread -lc -lgcc_s -lgcc /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o
+        COLLECT_GCC_OPTIONS='-fopenmp' '-v' '-o' 'cmTC_1a8dd' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-pthread' '-dumpdir' 'cmTC_1a8dd.'
+        /usr/bin/c++  -fopenmp -v CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o -o cmTC_1a8dd
+        gmake[1]: Leaving directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:296 (message)"
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:522 (_OPENMP_GET_FLAGS)"
+      - "CMakeLists.txt:28 (find_package)"
+    message: |
+      Parsed CXX OpenMP implicit link information from above output:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        ignore line: [Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_1a8dd/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_1a8dd.dir/build.make CMakeFiles/cmTC_1a8dd.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU']
+        ignore line: [Building CXX object CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o]
+        ignore line: [/usr/bin/c++   -fopenmp -std=gnu++17 -o CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o -c /home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-0yq1MU/OpenMPTryFlag.cpp]
+        ignore line: [Linking CXX executable cmTC_1a8dd]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_1a8dd.dir/link.txt --verbose=1]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper]
+        ignore line: [Target: riscv64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-19' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=riscv64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-libquadmath --disable-libquadmath-support --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --disable-multilib --with-arch=rv64gc --with-abi=lp64d --enable-checking=release --build=riscv64-linux-gnu --host=riscv64-linux-gnu --target=riscv64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-19) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/14/:/usr/libexec/gcc/riscv64-linux-gnu/:/usr/lib/gcc/riscv64-linux-gnu/14/:/usr/lib/gcc/riscv64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/riscv64-linux-gnu/14/:/lib/riscv64-linux-gnu/:/lib/:/usr/lib/riscv64-linux-gnu/:/usr/lib/]
+        ignore line: [Reading specs from /usr/lib/gcc/riscv64-linux-gnu/14/libgomp.spec]
+        ignore line: [COLLECT_GCC_OPTIONS='-fopenmp' '-v' '-o' 'cmTC_1a8dd' '-shared-libgcc' '-march=rv64imafdc_zicsr_zifencei' '-mabi=lp64d' '-misa-spec=20191213' '-mtls-dialect=trad' '-march=rv64imafdc_zicsr_zifencei' '-pthread' '-dumpdir' 'cmTC_1a8dd.']
+        link line: [ /usr/libexec/gcc/riscv64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccvGz1RW.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lpthread -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -hash-style=gnu --as-needed -melf64lriscv -X -dynamic-linker /lib/ld-linux-riscv64-lp64d.so.1 -pie -o cmTC_1a8dd /lib/riscv64-linux-gnu/Scrt1.o /usr/lib/gcc/riscv64-linux-gnu/14/crti.o /usr/lib/gcc/riscv64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/riscv64-linux-gnu/14 -L/lib/riscv64-linux-gnu -L/usr/lib/riscv64-linux-gnu CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o -lstdc++ -lm -lgomp -lgcc_s -lgcc -lpthread -lc -lgcc_s -lgcc /usr/lib/gcc/riscv64-linux-gnu/14/crtendS.o /usr/lib/gcc/riscv64-linux-gnu/14/crtn.o]
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/riscv64-linux-gnu/14/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/riscv64-linux-gnu/14/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccvGz1RW.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lpthread] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-melf64lriscv] ==> ignore
+          arg [-X] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib/ld-linux-riscv64-lp64d.so.1] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_1a8dd] ==> ignore
+          arg [-L/usr/lib/gcc/riscv64-linux-gnu/14] ==> dir [/usr/lib/gcc/riscv64-linux-gnu/14]
+          arg [-L/lib/riscv64-linux-gnu] ==> dir [/lib/riscv64-linux-gnu]
+          arg [-L/usr/lib/riscv64-linux-gnu] ==> dir [/usr/lib/riscv64-linux-gnu]
+          arg [CMakeFiles/cmTC_1a8dd.dir/OpenMPTryFlag.cpp.o] ==> ignore
+          arg [-lstdc++] ==> lib [stdc++]
+          arg [-lm] ==> lib [m]
+          arg [-lgomp] ==> lib [gomp]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lpthread] ==> lib [pthread]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+        collapse library dir [/usr/lib/gcc/riscv64-linux-gnu/14] ==> [/usr/lib/gcc/riscv64-linux-gnu/14]
+        collapse library dir [/lib/riscv64-linux-gnu] ==> [/lib/riscv64-linux-gnu]
+        collapse library dir [/usr/lib/riscv64-linux-gnu] ==> [/usr/lib/riscv64-linux-gnu]
+        implicit libs: [stdc++;m;gomp;gcc_s;gcc;pthread;c;gcc_s;gcc]
+        implicit objs: []
+        implicit dirs: [/usr/lib/gcc/riscv64-linux-gnu/14;/lib/riscv64-linux-gnu;/usr/lib/riscv64-linux-gnu]
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:456 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/FindOpenMP.cmake:596 (_OPENMP_GET_SPEC_DATE)"
+      - "CMakeLists.txt:28 (find_package)"
+    description: "Detecting CXX OpenMP version"
+    directories:
+      source: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-t6G0xJ"
+      binary: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-t6G0xJ"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "OpenMP_SPECTEST_CXX_"
+      cached: true
+      stdout: |
+        Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-t6G0xJ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b6989/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_b6989.dir/build.make CMakeFiles/cmTC_b6989.dir/build
+        gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-t6G0xJ'
+        Building CXX object CMakeFiles/cmTC_b6989.dir/OpenMPCheckVersion.cpp.o
+        /usr/bin/c++   -fopenmp -std=gnu++17 -o CMakeFiles/cmTC_b6989.dir/OpenMPCheckVersion.cpp.o -c /home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-t6G0xJ/OpenMPCheckVersion.cpp
+        Linking CXX executable cmTC_b6989
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b6989.dir/link.txt --verbose=1
+        /usr/bin/c++  -fopenmp CMakeFiles/cmTC_b6989.dir/OpenMPCheckVersion.cpp.o -o cmTC_b6989
+        gmake[1]: Leaving directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-t6G0xJ'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.31/Modules/CheckCXXCompilerFlag.cmake:55 (cmake_check_compiler_flag)"
+      - "CMakeLists.txt:41 (check_cxx_compiler_flag)"
+    checks:
+      - "Performing Test COMPILER_SUPPORTS_RVV"
+    directories:
+      source: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-qYJfd5"
+      binary: "/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-qYJfd5"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "COMPILER_SUPPORTS_RVV"
+      cached: true
+      stdout: |
+        Change Dir: '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-qYJfd5'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_45cd1/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_45cd1.dir/build.make CMakeFiles/cmTC_45cd1.dir/build
+        gmake[1]: Entering directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-qYJfd5'
+        Building CXX object CMakeFiles/cmTC_45cd1.dir/src.cxx.o
+        /usr/bin/c++ -DCOMPILER_SUPPORTS_RVV  -std=gnu++17   -march=rv64gcv -o CMakeFiles/cmTC_45cd1.dir/src.cxx.o -c /home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-qYJfd5/src.cxx
+        Linking CXX executable cmTC_45cd1
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_45cd1.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_45cd1.dir/src.cxx.o -o cmTC_45cd1
+        gmake[1]: Leaving directory '/home/h3250106394/lab02/build-riscv/CMakeFiles/CMakeScratch/TryCompile-qYJfd5'
+        
+      exitCode: 0
+...

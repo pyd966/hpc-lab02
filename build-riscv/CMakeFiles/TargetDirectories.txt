@@ -1,0 +1,5 @@
+/home/h3250106394/lab02/build-riscv/CMakeFiles/framework.dir
+/home/h3250106394/lab02/build-riscv/CMakeFiles/student.dir
+/home/h3250106394/lab02/build-riscv/CMakeFiles/lab2.dir
+/home/h3250106394/lab02/build-riscv/CMakeFiles/edit_cache.dir
+/home/h3250106394/lab02/build-riscv/CMakeFiles/rebuild_cache.dir
