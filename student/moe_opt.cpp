@@ -91,11 +91,10 @@ static void pack_s1_matrix(const int8_t* src, int output_dim,
 }
 
 static void pack_s2_matrix(const int8_t* src, int output_dim,
-                           int reduction_dim, int tile_blocks, int8_t* packed,
+                           int reduction_dim, int, int8_t* packed,
                            int32_t* row_sums) {
     const int output_blocks = output_dim / 16;
     const int reduction_blocks = reduction_dim / 4;
-    const int tile_count = output_blocks / tile_blocks;
 
     for (int o = 0; o < output_dim; o++) {
         int32_t sum = 0;
@@ -105,20 +104,14 @@ static void pack_s2_matrix(const int8_t* src, int output_dim,
         row_sums[o] = sum;
     }
 
-    for (int tile = 0; tile < tile_count; tile++) {
-        for (int rb = 0; rb < reduction_blocks; rb++) {
-            for (int local_ob = 0; local_ob < tile_blocks; local_ob++) {
-                const int ob = tile * tile_blocks + local_ob;
-                int8_t* block =
-                    packed +
-                    ((size_t)(tile * reduction_blocks + rb) * tile_blocks +
-                     local_ob) *
-                        64;
-                for (int lane = 0; lane < 16; lane++) {
-                    const int8_t* row =
-                        src + (size_t)(ob * 16 + lane) * reduction_dim + rb * 4;
-                    std::memcpy(block + lane * 4, row, 4);
-                }
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        for (int ob = 0; ob < output_blocks; ob++) {
+            int8_t* block =
+                packed + ((size_t)rb * output_blocks + ob) * 64;
+            for (int lane = 0; lane < 16; lane++) {
+                const int8_t* row =
+                    src + (size_t)(ob * 16 + lane) * reduction_dim + rb * 4;
+                std::memcpy(block + lane * 4, row, 4);
             }
         }
     }
@@ -686,6 +679,367 @@ static void s2_expert_ffn(int slot, float s_gate, float s_up, float s_down,
     }
 }
 
+template <int Blocks>
+__attribute__((noinline)) static void s2_gate_up_dot_range(
+    int slot, int start_ob, const uint8_t* xq_shifted, int32_t* gate_out,
+    int32_t* up_out) {
+    constexpr int output_blocks = S2_D_FF / 16;
+    constexpr int reduction_blocks = S2_D_MODEL / 4;
+    const int8_t* gate =
+        s2_gate_packed + (size_t)slot * S2_MATRIX_SIZE;
+    const int8_t* up = s2_up_packed + (size_t)slot * S2_MATRIX_SIZE;
+    const int32_t* gate_sums =
+        s2_gate_sums + (size_t)slot * S2_D_FF + start_ob * 16;
+    const int32_t* up_sums =
+        s2_up_sums + (size_t)slot * S2_D_FF + start_ob * 16;
+
+    __m512i acc_gate[Blocks];
+    __m512i acc_up[Blocks];
+    for (int ob = 0; ob < Blocks; ob++) {
+        acc_gate[ob] =
+            s1_corrected_accumulator(gate_sums + ob * 16);
+        acc_up[ob] = s1_corrected_accumulator(up_sums + ob * 16);
+    }
+
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, xq_shifted + rb * 4, 4);
+        const __m512i activation = _mm512_set1_epi32((int)activation4);
+        for (int ob = 0; ob < Blocks; ob++) {
+            const size_t offset =
+                ((size_t)rb * output_blocks + start_ob + ob) * 64;
+            acc_gate[ob] =
+                s2_dpbusd_mem(acc_gate[ob], activation, gate + offset);
+            acc_up[ob] =
+                s2_dpbusd_mem(acc_up[ob], activation, up + offset);
+        }
+    }
+
+    for (int ob = 0; ob < Blocks; ob++) {
+        _mm512_store_si512((__m512i*)(gate_out + ob * 16), acc_gate[ob]);
+        _mm512_store_si512((__m512i*)(up_out + ob * 16), acc_up[ob]);
+    }
+}
+
+template <int Blocks>
+static void s2_gate_up_range(int slot, int start_ob, float s_gate, float s_up,
+                             const uint8_t* xq_shifted, float s_x,
+                             float* hidden) {
+    alignas(64) int32_t gate_acc[Blocks * 16];
+    alignas(64) int32_t up_acc[Blocks * 16];
+    s2_gate_up_dot_range<Blocks>(slot, start_ob, xq_shifted, gate_acc, up_acc);
+
+    const __m512 gate_scale = _mm512_set1_ps(s_x * s_gate);
+    const __m512 up_scale = _mm512_set1_ps(s_x * s_up);
+    const __m512 one = _mm512_set1_ps(1.0f);
+    for (int ob = 0; ob < Blocks; ob++) {
+        const __m512 vg = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(gate_acc + ob * 16))),
+            gate_scale);
+        const __m512 vu = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(up_acc + ob * 16))),
+            up_scale);
+        const __m512 denominator = _mm512_add_ps(
+            one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
+        const __m512 silu =
+            _mm512_mul_ps(vg, reciprocal512_ps(denominator));
+        _mm512_store_ps(hidden + (start_ob + ob) * 16,
+                        _mm512_mul_ps(silu, vu));
+    }
+}
+
+static void s2_gate_up_dispatch(int blocks, int slot, int start_ob,
+                                float s_gate, float s_up,
+                                const uint8_t* xq_shifted, float s_x,
+                                float* hidden) {
+    switch (blocks) {
+        case 2:
+            s2_gate_up_range<2>(slot, start_ob, s_gate, s_up, xq_shifted, s_x,
+                                hidden);
+            break;
+        case 4:
+            s2_gate_up_range<4>(slot, start_ob, s_gate, s_up, xq_shifted, s_x,
+                                hidden);
+            break;
+        case 6:
+            s2_gate_up_range<6>(slot, start_ob, s_gate, s_up, xq_shifted, s_x,
+                                hidden);
+            break;
+        case 8:
+            s2_gate_up_range<8>(slot, start_ob, s_gate, s_up, xq_shifted, s_x,
+                                hidden);
+            break;
+        case 10:
+            s2_gate_up_range<8>(slot, start_ob, s_gate, s_up, xq_shifted, s_x,
+                                hidden);
+            s2_gate_up_range<2>(slot, start_ob + 8, s_gate, s_up, xq_shifted,
+                                s_x, hidden);
+            break;
+    }
+}
+
+template <int Blocks>
+__attribute__((noinline)) static void s2_down_dot_range(
+    int slot, int start_ob, const uint8_t* hq_shifted, int32_t* down_out) {
+    constexpr int output_blocks = S2_D_MODEL / 16;
+    constexpr int reduction_blocks = S2_D_FF / 4;
+    const int8_t* down =
+        s2_down_packed + (size_t)slot * S2_MATRIX_SIZE;
+    const int32_t* down_sums =
+        s2_down_sums + (size_t)slot * S2_D_MODEL + start_ob * 16;
+
+    __m512i acc[Blocks];
+    for (int ob = 0; ob < Blocks; ob++) {
+        acc[ob] = s1_corrected_accumulator(down_sums + ob * 16);
+    }
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, hq_shifted + rb * 4, 4);
+        const __m512i activation = _mm512_set1_epi32((int)activation4);
+        for (int ob = 0; ob < Blocks; ob++) {
+            const size_t offset =
+                ((size_t)rb * output_blocks + start_ob + ob) * 64;
+            acc[ob] = s2_dpbusd_mem(acc[ob], activation, down + offset);
+        }
+    }
+    for (int ob = 0; ob < Blocks; ob++) {
+        _mm512_store_si512((__m512i*)(down_out + ob * 16), acc[ob]);
+    }
+}
+
+template <int Blocks>
+static void s2_down_range(int slot, int start_ob, float s_down,
+                          const uint8_t* hq_shifted, float s_h, float* out) {
+    alignas(64) int32_t down_acc[Blocks * 16];
+    s2_down_dot_range<Blocks>(slot, start_ob, hq_shifted, down_acc);
+    const __m512 output_scale = _mm512_set1_ps(s_h * s_down);
+    for (int ob = 0; ob < Blocks; ob++) {
+        const __m512 result = _mm512_mul_ps(
+            _mm512_cvtepi32_ps(
+                _mm512_load_si512((const __m512i*)(down_acc + ob * 16))),
+            output_scale);
+        _mm512_store_ps(out + (start_ob + ob) * 16, result);
+    }
+}
+
+static void s2_down_dispatch(int blocks, int slot, int start_ob, float s_down,
+                             const uint8_t* hq_shifted, float s_h,
+                             float* out) {
+    switch (blocks) {
+        case 4:
+            s2_down_range<4>(slot, start_ob, s_down, hq_shifted, s_h, out);
+            break;
+        case 8:
+            s2_down_range<8>(slot, start_ob, s_down, hq_shifted, s_h, out);
+            break;
+        case 12:
+            s2_down_range<12>(slot, start_ob, s_down, hq_shifted, s_h, out);
+            break;
+        case 16:
+            s2_down_range<16>(slot, start_ob, s_down, hq_shifted, s_h, out);
+            break;
+        case 20:
+            s2_down_range<16>(slot, start_ob, s_down, hq_shifted, s_h, out);
+            s2_down_range<4>(slot, start_ob + 16, s_down, hq_shifted, s_h,
+                             out);
+            break;
+    }
+}
+
+constexpr int S2_ACTIVE_TASKS = MAX_TOP_K + 1;
+
+__attribute__((noinline)) static void s2_gate_up_dot_shards(
+    const int* slots, int start_ob, const uint8_t* xq_shifted,
+    int32_t* gate_out, int32_t* up_out) {
+    constexpr int blocks = 2;
+    constexpr int output_blocks = S2_D_FF / 16;
+    constexpr int reduction_blocks = S2_D_MODEL / 4;
+    const int8_t* gate[S2_ACTIVE_TASKS];
+    const int8_t* up[S2_ACTIVE_TASKS];
+    const int32_t* gate_sums[S2_ACTIVE_TASKS];
+    const int32_t* up_sums[S2_ACTIVE_TASKS];
+    __m512i gate_acc[S2_ACTIVE_TASKS][blocks];
+    __m512i up_acc[S2_ACTIVE_TASKS][blocks];
+
+#pragma GCC unroll 5
+    for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+        gate[task] = s2_gate_packed + (size_t)slots[task] * S2_MATRIX_SIZE;
+        up[task] = s2_up_packed + (size_t)slots[task] * S2_MATRIX_SIZE;
+        gate_sums[task] =
+            s2_gate_sums + (size_t)slots[task] * S2_D_FF + start_ob * 16;
+        up_sums[task] =
+            s2_up_sums + (size_t)slots[task] * S2_D_FF + start_ob * 16;
+#pragma GCC unroll 2
+        for (int ob = 0; ob < blocks; ob++) {
+            gate_acc[task][ob] =
+                s1_corrected_accumulator(gate_sums[task] + ob * 16);
+            up_acc[task][ob] =
+                s1_corrected_accumulator(up_sums[task] + ob * 16);
+        }
+    }
+
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+        uint32_t activation4;
+        std::memcpy(&activation4, xq_shifted + rb * 4, 4);
+        const __m512i activation = _mm512_set1_epi32((int)activation4);
+#pragma GCC unroll 5
+        for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+#pragma GCC unroll 2
+            for (int ob = 0; ob < blocks; ob++) {
+                const size_t offset =
+                    ((size_t)rb * output_blocks + start_ob + ob) * 64;
+                gate_acc[task][ob] = s2_dpbusd_mem(
+                    gate_acc[task][ob], activation, gate[task] + offset);
+                up_acc[task][ob] = s2_dpbusd_mem(
+                    up_acc[task][ob], activation, up[task] + offset);
+            }
+        }
+    }
+
+#pragma GCC unroll 5
+    for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+#pragma GCC unroll 2
+        for (int ob = 0; ob < blocks; ob++) {
+            _mm512_store_si512(
+                (__m512i*)(gate_out + (task * blocks + ob) * 16),
+                gate_acc[task][ob]);
+            _mm512_store_si512(
+                (__m512i*)(up_out + (task * blocks + ob) * 16),
+                up_acc[task][ob]);
+        }
+    }
+}
+
+static void s2_gate_up_shards(const int* slots, int start_ob,
+                              const float* gate_scales,
+                              const float* up_scales,
+                              const uint8_t* xq_shifted, float s_x,
+                              float hidden[S2_ACTIVE_TASKS][S2_D_FF]) {
+    constexpr int blocks = 2;
+    alignas(64) int32_t gate_acc[S2_ACTIVE_TASKS * blocks * 16];
+    alignas(64) int32_t up_acc[S2_ACTIVE_TASKS * blocks * 16];
+    s2_gate_up_dot_shards(slots, start_ob, xq_shifted, gate_acc, up_acc);
+    const __m512 one = _mm512_set1_ps(1.0f);
+
+    for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+        const __m512 gate_scale = _mm512_set1_ps(s_x * gate_scales[task]);
+        const __m512 up_scale = _mm512_set1_ps(s_x * up_scales[task]);
+        for (int ob = 0; ob < blocks; ob++) {
+            const int offset = (task * blocks + ob) * 16;
+            const __m512 vg = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(_mm512_load_si512(
+                    (const __m512i*)(gate_acc + offset))),
+                gate_scale);
+            const __m512 vu = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(
+                    _mm512_load_si512((const __m512i*)(up_acc + offset))),
+                up_scale);
+            const __m512 denominator = _mm512_add_ps(
+                one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
+            const __m512 silu =
+                _mm512_mul_ps(vg, reciprocal512_ps(denominator));
+            _mm512_store_ps(hidden[task] + (start_ob + ob) * 16,
+                            _mm512_mul_ps(silu, vu));
+        }
+    }
+}
+
+__attribute__((noinline)) static void s2_down_dot_shards(
+    const int* slots, int start_ob,
+    const uint8_t hq_shifted[S2_ACTIVE_TASKS][S2_D_FF],
+    int32_t* down_out) {
+    constexpr int blocks = 4;
+    constexpr int output_blocks = S2_D_MODEL / 16;
+    constexpr int reduction_blocks = S2_D_FF / 4;
+    const int8_t* down[S2_ACTIVE_TASKS];
+    const int32_t* down_sums[S2_ACTIVE_TASKS];
+    __m512i acc[S2_ACTIVE_TASKS][blocks];
+
+#pragma GCC unroll 5
+    for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+        down[task] = s2_down_packed + (size_t)slots[task] * S2_MATRIX_SIZE;
+        down_sums[task] =
+            s2_down_sums + (size_t)slots[task] * S2_D_MODEL + start_ob * 16;
+#pragma GCC unroll 4
+        for (int ob = 0; ob < blocks; ob++) {
+            acc[task][ob] =
+                s1_corrected_accumulator(down_sums[task] + ob * 16);
+        }
+    }
+
+    for (int rb = 0; rb < reduction_blocks; rb++) {
+#pragma GCC unroll 5
+        for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+            uint32_t activation4;
+            std::memcpy(&activation4, hq_shifted[task] + rb * 4, 4);
+            const __m512i activation = _mm512_set1_epi32((int)activation4);
+#pragma GCC unroll 4
+            for (int ob = 0; ob < blocks; ob++) {
+                const size_t offset =
+                    ((size_t)rb * output_blocks + start_ob + ob) * 64;
+                acc[task][ob] = s2_dpbusd_mem(
+                    acc[task][ob], activation, down[task] + offset);
+            }
+        }
+    }
+
+#pragma GCC unroll 5
+    for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+#pragma GCC unroll 4
+        for (int ob = 0; ob < blocks; ob++) {
+            _mm512_store_si512(
+                (__m512i*)(down_out + (task * blocks + ob) * 16),
+                acc[task][ob]);
+        }
+    }
+}
+
+static void s2_down_shards(
+    const int* slots, int start_ob, const float* down_scales,
+    const uint8_t hq_shifted[S2_ACTIVE_TASKS][S2_D_FF],
+    const float* hidden_scale,
+    float expert_out[S2_ACTIVE_TASKS][S2_D_MODEL]) {
+    constexpr int blocks = 4;
+    alignas(64) int32_t down_acc[S2_ACTIVE_TASKS * blocks * 16];
+    s2_down_dot_shards(slots, start_ob, hq_shifted, down_acc);
+
+    for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+        const __m512 scale =
+            _mm512_set1_ps(hidden_scale[task] * down_scales[task]);
+        for (int ob = 0; ob < blocks; ob++) {
+            const int offset = (task * blocks + ob) * 16;
+            _mm512_store_ps(
+                expert_out[task] + (start_ob + ob) * 16,
+                _mm512_mul_ps(
+                    _mm512_cvtepi32_ps(_mm512_load_si512(
+                        (const __m512i*)(down_acc + offset))),
+                    scale));
+        }
+    }
+}
+
+static void s2_expert_ffn_ranges(int slot, float s_gate, float s_up,
+                                 float s_down, const uint8_t* xq_shifted,
+                                 float s_x, float* out) {
+    alignas(64) float hidden[S2_D_FF];
+    for (int start_ob = 0; start_ob < S2_D_FF / 16; start_ob += 10) {
+        int blocks = S2_D_FF / 16 - start_ob;
+        if (blocks > 10) blocks = 10;
+        s2_gate_up_dispatch(blocks, slot, start_ob, s_gate, s_up, xq_shifted,
+                            s_x, hidden);
+    }
+
+    alignas(64) uint8_t hq_shifted[S2_D_FF];
+    const float s_h = quantize_s1_u8(hidden, S2_D_FF, hq_shifted);
+    for (int start_ob = 0; start_ob < S2_D_MODEL / 16; start_ob += 20) {
+        int blocks = S2_D_MODEL / 16 - start_ob;
+        if (blocks > 20) blocks = 20;
+        s2_down_dispatch(blocks, slot, start_ob, s_down, hq_shifted, s_h, out);
+    }
+}
+
 constexpr int S1_MAX_BACKGROUND_WORKERS = MAX_TOP_K;
 
 struct alignas(64) S1WorkerTask {
@@ -1035,22 +1389,111 @@ static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
     alignas(64) uint8_t xq_shifted[S2_D_MODEL];
     const float s_x = quantize_s1_u8(x, S2_D_MODEL, xq_shifted);
     alignas(64) float expert_out[MAX_TOP_K + 1][S2_D_MODEL];
+    alignas(64) float hidden[MAX_TOP_K + 1][S2_D_FF];
+    alignas(64) uint8_t hq_shifted[MAX_TOP_K + 1][S2_D_FF];
+    alignas(64) float hidden_scale[MAX_TOP_K + 1];
+    int slots[MAX_TOP_K + 1] = {0};
+    float gate_scales[MAX_TOP_K + 1] = {w.sh_s_gate};
+    float up_scales[MAX_TOP_K + 1] = {w.sh_s_up};
+    float down_scales[MAX_TOP_K + 1] = {w.sh_s_down};
+    for (int task = 1; task < w.top_k + 1; task++) {
+        const int expert = topk_idx[task - 1];
+        slots[task] = expert + 1;
+        gate_scales[task] = w.s_gate[expert];
+        up_scales[task] = w.s_up[expert];
+        down_scales[task] = w.s_down[expert];
+    }
+
 #ifdef _OPENMP
-    int expert_threads = omp_get_max_threads();
-    if (expert_threads > w.top_k + 1) expert_threads = w.top_k + 1;
+    int available_threads = omp_get_max_threads();
+    if (available_threads > 16) available_threads = 16;
 #else
-    constexpr int expert_threads = 1;
+    constexpr int available_threads = 1;
 #endif
+#if 0
+    // Retained L2 experiments. Replace the active 16-thread branch below to
+    // benchmark either variant again.
+#pragma omp parallel num_threads(16)
+    {
+        const int thread = omp_get_thread_num();
+        for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+            s2_gate_up_dispatch(2, slots[task], thread * 2,
+                                gate_scales[task], up_scales[task],
+                                xq_shifted, s_x, hidden[task]);
+        }
+#pragma omp barrier
+        if (thread < S2_ACTIVE_TASKS) {
+            hidden_scale[thread] = quantize_s1_u8(
+                hidden[thread], S2_D_FF, hq_shifted[thread]);
+        }
+#pragma omp barrier
+        for (int task = 0; task < S2_ACTIVE_TASKS; task++) {
+            s2_down_dispatch(4, slots[task], thread * 4,
+                             down_scales[task], hq_shifted[task],
+                             hidden_scale[task], expert_out[task]);
+        }
+    }
+
+#pragma omp parallel num_threads(16)
+    {
+        const int thread = omp_get_thread_num();
+        s2_gate_up_shards(slots, thread * 2, gate_scales, up_scales,
+                          xq_shifted, s_x, hidden);
+#pragma omp barrier
+        if (thread < S2_ACTIVE_TASKS) {
+            hidden_scale[thread] = quantize_s1_u8(
+                hidden[thread], S2_D_FF, hq_shifted[thread]);
+        }
+#pragma omp barrier
+        s2_down_shards(slots, thread * 4, down_scales, hq_shifted,
+                       hidden_scale, expert_out);
+    }
+#endif
+    if (available_threads == 16) {
+#pragma omp parallel num_threads(16)
+        {
+            const int thread = omp_get_thread_num();
+            int block = thread * 10;
+            const int gate_end = block + 10;
+            while (block < gate_end) {
+                const int task = block / (S2_D_FF / 16);
+                const int start_ob = block % (S2_D_FF / 16);
+                int blocks = S2_D_FF / 16 - start_ob;
+                if (blocks > gate_end - block) blocks = gate_end - block;
+                s2_gate_up_dispatch(
+                    blocks, slots[task], start_ob, gate_scales[task],
+                    up_scales[task], xq_shifted, s_x, hidden[task]);
+                block += blocks;
+            }
+
+#pragma omp barrier
+            if (thread < w.top_k + 1) {
+                hidden_scale[thread] = quantize_s1_u8(
+                    hidden[thread], S2_D_FF, hq_shifted[thread]);
+            }
+#pragma omp barrier
+
+            block = thread * 20;
+            const int down_end = block + 20;
+            while (block < down_end) {
+                const int task = block / (S2_D_MODEL / 16);
+                const int start_ob = block % (S2_D_MODEL / 16);
+                int blocks = S2_D_MODEL / 16 - start_ob;
+                if (blocks > down_end - block) blocks = down_end - block;
+                s2_down_dispatch(
+                    blocks, slots[task], start_ob, down_scales[task],
+                    hq_shifted[task], hidden_scale[task], expert_out[task]);
+                block += blocks;
+            }
+        }
+    } else {
+        int expert_threads = available_threads;
+        if (expert_threads > w.top_k + 1) expert_threads = w.top_k + 1;
 #pragma omp parallel for schedule(static) num_threads(expert_threads)
-    for (int task = 0; task < w.top_k + 1; task++) {
-        if (task == 0) {
-            s2_expert_ffn(0, w.sh_s_gate, w.sh_s_up, w.sh_s_down, xq_shifted,
-                          s_x, expert_out[0]);
-        } else {
-            const int expert = topk_idx[task - 1];
-            s2_expert_ffn(expert + 1, w.s_gate[expert], w.s_up[expert],
-                          w.s_down[expert], xq_shifted, s_x,
-                          expert_out[task]);
+        for (int task = 0; task < w.top_k + 1; task++) {
+            s2_expert_ffn_ranges(
+                slots[task], gate_scales[task], up_scales[task],
+                down_scales[task], xq_shifted, s_x, expert_out[task]);
         }
     }
 
