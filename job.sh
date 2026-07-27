@@ -19,8 +19,8 @@ export OMP_PLACES=${OMP_PLACES:-cores}
 
 ITER_S1=${ITER_S1:-10000}
 ITER_S2=${ITER_S2:-10000}
-ITER_S3=${ITER_S3:-20000}
-ITER_S4=${ITER_S4:-1000}
+ITER_S3=${ITER_S3:-1000}
+ITER_S4=${ITER_S4:-30}
 
 run_case() {
     local name="$1"
@@ -30,6 +30,6 @@ run_case() {
 }
 
 # run_case S1 1 256 128 16 4 "${ITER_S1}"
-run_case S2 1 1024 512 16 4 "${ITER_S2}"
-# run_case S3 128 256 128 16 4 "${ITER_S3}"
+# run_case S2 1 1024 512 16 4 "${ITER_S2}"
+run_case S3 128 256 128 16 4 "${ITER_S3}"
 # run_case S4 1024 512 128 512 2 "${ITER_S4}"

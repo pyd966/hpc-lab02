@@ -2,6 +2,7 @@
 
 #include "moe.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -10,6 +11,12 @@
 #include <pthread.h>
 #include <sched.h>
 #include <thread>
+
+#if defined(__linux__)
+#include <asm/prctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 
 #if defined(__AVX512F__) && defined(__AVX512VNNI__)
 #include <immintrin.h>
@@ -42,6 +49,17 @@ constexpr int S2_DOWN_BLOCKS_PER_SHARD =
     (S2_D_MODEL / 16) / S2_THREAD_SHARDS;
 constexpr size_t S2_MATRIX_SIZE = (size_t)S2_D_MODEL * S2_D_FF;
 constexpr size_t S2_SHARD_MATRIX_SIZE = S2_MATRIX_SIZE / S2_THREAD_SHARDS;
+constexpr int S3_NUM_TOKENS = 128;
+constexpr int S3_D_MODEL = 256;
+constexpr int S3_D_FF = 128;
+constexpr int S3_NUM_EXPERTS = 16;
+constexpr int S3_EXPERT_SLOTS = S3_NUM_EXPERTS + 1;
+constexpr int S3_TOP_K = 4;
+constexpr int S3_ROUTED_ASSIGNMENTS = S3_NUM_TOKENS * S3_TOP_K;
+constexpr int S3_TILE_ROWS = 16;
+constexpr int S3_TILE_BYTES = 64;
+constexpr int S3_C_TILES = 6;
+constexpr size_t S3_MATRIX_SIZE = (size_t)S3_D_MODEL * S3_D_FF;
 
 alignas(64) static float s1_router_transposed[S1_D_MODEL * S1_NUM_EXPERTS];
 alignas(64) static int8_t
@@ -72,6 +90,73 @@ static_assert(sizeof(S2ExpertShard) * S2_EXPERT_SLOTS < 2 * 1024 * 1024,
 alignas(64) static S2ExpertShard
     s2_expert_shards[S2_THREAD_SHARDS][S2_EXPERT_SLOTS];
 static bool s2_preprocessed = false;
+
+#if defined(__AMX_TILE__) && defined(__AMX_INT8__)
+alignas(64) static float
+    s3_router_transposed[S3_D_MODEL * S3_NUM_EXPERTS];
+alignas(64) static int8_t
+    s3_gate_packed[S3_EXPERT_SLOTS * S3_MATRIX_SIZE];
+alignas(64) static int8_t
+    s3_up_packed[S3_EXPERT_SLOTS * S3_MATRIX_SIZE];
+alignas(64) static int8_t
+    s3_down_packed[S3_EXPERT_SLOTS * S3_MATRIX_SIZE];
+static bool s3_preprocessed = false;
+
+struct alignas(64) S3TileConfig {
+    uint8_t palette_id;
+    uint8_t start_row;
+    uint8_t reserved[14];
+    uint16_t colsb[8];
+    uint8_t reserved_2[16];
+    uint8_t rows[8];
+    uint8_t reserved_3[8];
+};
+
+static_assert(sizeof(S3TileConfig) == 64);
+
+alignas(64) static const S3TileConfig s3_tile_config = {
+    1,
+    0,
+    {},
+    {S3_TILE_BYTES, S3_TILE_BYTES, S3_TILE_BYTES, S3_TILE_BYTES,
+     S3_TILE_BYTES, S3_TILE_BYTES, S3_TILE_BYTES, S3_TILE_BYTES},
+    {},
+    {S3_TILE_ROWS, S3_TILE_ROWS, S3_TILE_ROWS, S3_TILE_ROWS,
+     S3_TILE_ROWS, S3_TILE_ROWS, S3_TILE_ROWS, S3_TILE_ROWS},
+    {}};
+
+static void pack_s3_matrix(const int8_t* src, int output_dim,
+                           int reduction_dim, int8_t* packed) {
+    const int output_blocks = output_dim / 16;
+    const int reduction_blocks = reduction_dim / 64;
+    for (int ob = 0; ob < output_blocks; ob++) {
+        for (int rb = 0; rb < reduction_blocks; rb++) {
+            int8_t* tile =
+                packed + ((size_t)ob * reduction_blocks + rb) * 1024;
+            for (int kg = 0; kg < 16; kg++) {
+                for (int n = 0; n < 16; n++) {
+                    for (int k = 0; k < 4; k++) {
+                        tile[kg * 64 + n * 4 + k] =
+                            src[(size_t)(ob * 16 + n) * reduction_dim +
+                                rb * 64 + kg * 4 + k];
+                    }
+                }
+            }
+        }
+    }
+}
+
+static bool request_s3_amx_permission() {
+#if defined(__linux__) && defined(SYS_arch_prctl) && \
+    defined(ARCH_REQ_XCOMP_PERM)
+    constexpr unsigned long xfeature_xtiledata = 18;
+    return syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM,
+                   xfeature_xtiledata) == 0;
+#else
+    return true;
+#endif
+}
+#endif
 
 static void pack_s1_matrix(const int8_t* src, int output_dim,
                            int reduction_dim, int8_t* packed,
@@ -213,7 +298,34 @@ static void preprocess_s2(MoEWeights& w) {
 #endif
 }
 
-static void preprocess_s3(MoEWeights& w) {}
+static void preprocess_s3(MoEWeights& w) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
+    defined(__AMX_TILE__) && defined(__AMX_INT8__)
+    for (int d = 0; d < S3_D_MODEL; d++) {
+        for (int e = 0; e < S3_NUM_EXPERTS; e++) {
+            s3_router_transposed[(size_t)d * S3_NUM_EXPERTS + e] =
+                w.w_router[(size_t)e * S3_D_MODEL + d];
+        }
+    }
+
+    pack_s3_matrix(w.sh_gate, S3_D_FF, S3_D_MODEL, s3_gate_packed);
+    pack_s3_matrix(w.sh_up, S3_D_FF, S3_D_MODEL, s3_up_packed);
+    pack_s3_matrix(w.sh_down, S3_D_MODEL, S3_D_FF, s3_down_packed);
+    for (int e = 0; e < S3_NUM_EXPERTS; e++) {
+        const int slot = e + 1;
+        pack_s3_matrix(w.w_gate + (size_t)e * S3_MATRIX_SIZE, S3_D_FF,
+                       S3_D_MODEL,
+                       s3_gate_packed + (size_t)slot * S3_MATRIX_SIZE);
+        pack_s3_matrix(w.w_up + (size_t)e * S3_MATRIX_SIZE, S3_D_FF,
+                       S3_D_MODEL,
+                       s3_up_packed + (size_t)slot * S3_MATRIX_SIZE);
+        pack_s3_matrix(w.w_down + (size_t)e * S3_MATRIX_SIZE, S3_D_MODEL,
+                       S3_D_FF,
+                       s3_down_packed + (size_t)slot * S3_MATRIX_SIZE);
+    }
+    s3_preprocessed = request_s3_amx_permission();
+#endif
+}
 
 static void preprocess_s4(MoEWeights& w) {}
 
@@ -432,6 +544,237 @@ static __m512 reciprocal512_ps(__m512 x) {
         reciprocal,
         _mm512_fnmadd_ps(x, reciprocal, _mm512_set1_ps(2.0f)));
 }
+
+#if defined(__AMX_TILE__) && defined(__AMX_INT8__)
+static float quantize_s3_s8(const float* values, int count, int8_t* quantized) {
+    const __m512i abs_mask = _mm512_set1_epi32(0x7fffffff);
+    __m512 max_abs = _mm512_setzero_ps();
+    for (int i = 0; i < count; i += 16) {
+        const __m512 value = _mm512_loadu_ps(values + i);
+        const __m512 absolute = _mm512_castsi512_ps(
+            _mm512_and_si512(_mm512_castps_si512(value), abs_mask));
+        max_abs = _mm512_max_ps(max_abs, absolute);
+    }
+
+    const float amax = _mm512_reduce_max_ps(max_abs);
+    const float scale = amax > 0.0f ? amax / 127.0f : 1.0f;
+    const float inverse_scale = amax > 0.0f ? 127.0f / amax : 1.0f;
+    const __m512 inverse = _mm512_set1_ps(inverse_scale);
+    for (int i = 0; i < count; i += 16) {
+        const __m512i values_i32 = _mm512_cvtps_epi32(
+            _mm512_mul_ps(_mm512_loadu_ps(values + i), inverse));
+        _mm_store_si128((__m128i*)(quantized + i),
+                        _mm512_cvtsepi32_epi8(values_i32));
+    }
+    return scale;
+}
+
+static inline void s3_tile_zero_outputs(int active) {
+    if (active > 0) _tile_zero(2);
+    if (active > 1) _tile_zero(3);
+    if (active > 2) _tile_zero(4);
+    if (active > 3) _tile_zero(5);
+    if (active > 4) _tile_zero(6);
+    if (active > 5) _tile_zero(7);
+}
+
+static inline void s3_tile_accumulate_outputs(
+    int active, const int8_t* input, int input_stride, int first_row_tile,
+    int reduction_offset) {
+    const int8_t* first =
+        input + (size_t)first_row_tile * S3_TILE_ROWS * input_stride +
+        reduction_offset;
+    if (active > 0) {
+        _tile_loadd(0, first, input_stride);
+        _tile_dpbssd(2, 0, 1);
+    }
+    if (active > 1) {
+        _tile_loadd(0, first + (size_t)S3_TILE_ROWS * input_stride,
+                    input_stride);
+        _tile_dpbssd(3, 0, 1);
+    }
+    if (active > 2) {
+        _tile_loadd(0, first + (size_t)2 * S3_TILE_ROWS * input_stride,
+                    input_stride);
+        _tile_dpbssd(4, 0, 1);
+    }
+    if (active > 3) {
+        _tile_loadd(0, first + (size_t)3 * S3_TILE_ROWS * input_stride,
+                    input_stride);
+        _tile_dpbssd(5, 0, 1);
+    }
+    if (active > 4) {
+        _tile_loadd(0, first + (size_t)4 * S3_TILE_ROWS * input_stride,
+                    input_stride);
+        _tile_dpbssd(6, 0, 1);
+    }
+    if (active > 5) {
+        _tile_loadd(0, first + (size_t)5 * S3_TILE_ROWS * input_stride,
+                    input_stride);
+        _tile_dpbssd(7, 0, 1);
+    }
+}
+
+static inline void s3_tile_store_projection(
+    int active, int32_t* output, int output_stride, int first_row_tile,
+    int output_offset) {
+    int32_t* first =
+        output + (size_t)first_row_tile * S3_TILE_ROWS * output_stride +
+        output_offset;
+    const int stride_bytes = output_stride * (int)sizeof(int32_t);
+    if (active > 0) _tile_stored(2, first, stride_bytes);
+    if (active > 1)
+        _tile_stored(3, first + (size_t)S3_TILE_ROWS * output_stride,
+                     stride_bytes);
+    if (active > 2)
+        _tile_stored(4, first + (size_t)2 * S3_TILE_ROWS * output_stride,
+                     stride_bytes);
+    if (active > 3)
+        _tile_stored(5, first + (size_t)3 * S3_TILE_ROWS * output_stride,
+                     stride_bytes);
+    if (active > 4)
+        _tile_stored(6, first + (size_t)4 * S3_TILE_ROWS * output_stride,
+                     stride_bytes);
+    if (active > 5)
+        _tile_stored(7, first + (size_t)5 * S3_TILE_ROWS * output_stride,
+                     stride_bytes);
+}
+
+static void s3_amx_projection(const int8_t* input, int rows,
+                              int reduction_dim, const int8_t* weights,
+                              int output_dim, int32_t* output) {
+    const int row_tiles = rows / S3_TILE_ROWS;
+    const int output_blocks = output_dim / 16;
+    const int reduction_blocks = reduction_dim / S3_TILE_BYTES;
+    for (int first_row_tile = 0; first_row_tile < row_tiles;
+         first_row_tile += S3_C_TILES) {
+        const int active =
+            std::min(S3_C_TILES, row_tiles - first_row_tile);
+        for (int ob = 0; ob < output_blocks; ob++) {
+            s3_tile_zero_outputs(active);
+            for (int rb = 0; rb < reduction_blocks; rb++) {
+                const int8_t* weight_tile =
+                    weights +
+                    ((size_t)ob * reduction_blocks + rb) * 1024;
+                _tile_loadd(1, weight_tile, S3_TILE_BYTES);
+                s3_tile_accumulate_outputs(
+                    active, input, reduction_dim, first_row_tile,
+                    rb * S3_TILE_BYTES);
+            }
+            s3_tile_store_projection(active, output, output_dim,
+                                     first_row_tile, ob * 16);
+        }
+    }
+}
+
+static inline void s3_tile_store_down(
+    int active, int32_t output[S3_C_TILES][S3_TILE_ROWS][16]) {
+    if (active > 0) _tile_stored(2, output[0], 64);
+    if (active > 1) _tile_stored(3, output[1], 64);
+    if (active > 2) _tile_stored(4, output[2], 64);
+    if (active > 3) _tile_stored(5, output[3], 64);
+    if (active > 4) _tile_stored(6, output[4], 64);
+    if (active > 5) _tile_stored(7, output[5], 64);
+}
+
+static void s3_amx_down(const int8_t* hidden, int padded_rows, int valid_rows,
+                        const int8_t* weights, const float* hidden_scales,
+                        float weight_scale, const int* token_ids,
+                        const float* mixtures, bool shared, const float* x,
+                        float* y) {
+    const int row_tiles = padded_rows / S3_TILE_ROWS;
+    constexpr int output_blocks = S3_D_MODEL / 16;
+    constexpr int reduction_blocks = S3_D_FF / S3_TILE_BYTES;
+    alignas(64)
+        int32_t tile_output[S3_C_TILES][S3_TILE_ROWS][16];
+
+    for (int first_row_tile = 0; first_row_tile < row_tiles;
+         first_row_tile += S3_C_TILES) {
+        const int active =
+            std::min(S3_C_TILES, row_tiles - first_row_tile);
+        for (int ob = 0; ob < output_blocks; ob++) {
+            s3_tile_zero_outputs(active);
+            for (int rb = 0; rb < reduction_blocks; rb++) {
+                const int8_t* weight_tile =
+                    weights +
+                    ((size_t)ob * reduction_blocks + rb) * 1024;
+                _tile_loadd(1, weight_tile, S3_TILE_BYTES);
+                s3_tile_accumulate_outputs(
+                    active, hidden, S3_D_FF, first_row_tile,
+                    rb * S3_TILE_BYTES);
+            }
+            s3_tile_store_down(active, tile_output);
+
+            for (int tile = 0; tile < active; tile++) {
+                for (int r = 0; r < S3_TILE_ROWS; r++) {
+                    const int row =
+                        (first_row_tile + tile) * S3_TILE_ROWS + r;
+                    if (row >= valid_rows) continue;
+                    const int token = shared ? row : token_ids[row];
+                    float scale = hidden_scales[row] * weight_scale;
+                    if (!shared) scale *= mixtures[row];
+                    const __m512 result = _mm512_mul_ps(
+                        _mm512_cvtepi32_ps(_mm512_load_si512(
+                            (const __m512i*)tile_output[tile][r])),
+                        _mm512_set1_ps(scale));
+                    float* output = y + (size_t)token * S3_D_MODEL + ob * 16;
+                    if (shared) {
+                        const float* residual =
+                            x + (size_t)token * S3_D_MODEL + ob * 16;
+                        _mm512_storeu_ps(
+                            output,
+                            _mm512_add_ps(_mm512_loadu_ps(residual), result));
+                    } else {
+                        _mm512_storeu_ps(
+                            output,
+                            _mm512_add_ps(_mm512_loadu_ps(output), result));
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void s3_router_four(const float* x, float* affinities) {
+    __m512 accumulator[4][4];
+    for (int token = 0; token < 4; token++) {
+        for (int lane = 0; lane < 4; lane++) {
+            accumulator[token][lane] = _mm512_setzero_ps();
+        }
+    }
+
+    for (int d = 0; d < S3_D_MODEL; d += 4) {
+        __m512 weight[4];
+        for (int lane = 0; lane < 4; lane++) {
+            weight[lane] = _mm512_load_ps(
+                s3_router_transposed +
+                (size_t)(d + lane) * S3_NUM_EXPERTS);
+        }
+        for (int token = 0; token < 4; token++) {
+            const float* input =
+                x + (size_t)token * S3_D_MODEL + d;
+            for (int lane = 0; lane < 4; lane++) {
+                accumulator[token][lane] = _mm512_fmadd_ps(
+                    _mm512_set1_ps(input[lane]), weight[lane],
+                    accumulator[token][lane]);
+            }
+        }
+    }
+
+    const __m512 one = _mm512_set1_ps(1.0f);
+    for (int token = 0; token < 4; token++) {
+        const __m512 sum = _mm512_add_ps(
+            _mm512_add_ps(accumulator[token][0],
+                          accumulator[token][1]),
+            _mm512_add_ps(accumulator[token][2],
+                          accumulator[token][3]));
+        const __m512 affinity = reciprocal512_ps(_mm512_add_ps(
+            one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), sum))));
+        _mm512_store_ps(affinities + token * S3_NUM_EXPERTS, affinity);
+    }
+}
+#endif
+
 
 static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
                           const uint8_t* xq_shifted, float s_x, float* out) {
@@ -1393,9 +1736,177 @@ static void moe_forward_optimized_s2(const float* x, const MoEWeights& w,
 #endif
 }
 
+#if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
+    defined(__AMX_TILE__) && defined(__AMX_INT8__)
+static void s3_execute_expert(
+    int slot, const int8_t* input, int padded_rows, int valid_rows,
+    const float* input_scales, float gate_scale, float up_scale,
+    float down_scale, const int* token_ids, const float* mixtures,
+    bool shared, const float* x, float* y) {
+    alignas(64)
+        int32_t gate_acc[S3_NUM_TOKENS * S3_D_FF];
+    alignas(64)
+        int32_t up_acc[S3_NUM_TOKENS * S3_D_FF];
+    alignas(64) float hidden[S3_NUM_TOKENS * S3_D_FF];
+    alignas(64) int8_t hidden_q[S3_NUM_TOKENS * S3_D_FF];
+    alignas(64) float hidden_scales[S3_NUM_TOKENS];
+
+    const int8_t* gate =
+        s3_gate_packed + (size_t)slot * S3_MATRIX_SIZE;
+    const int8_t* up = s3_up_packed + (size_t)slot * S3_MATRIX_SIZE;
+    const int8_t* down =
+        s3_down_packed + (size_t)slot * S3_MATRIX_SIZE;
+    s3_amx_projection(input, padded_rows, S3_D_MODEL, gate, S3_D_FF,
+                      gate_acc);
+    s3_amx_projection(input, padded_rows, S3_D_MODEL, up, S3_D_FF, up_acc);
+
+    const __m512 one = _mm512_set1_ps(1.0f);
+    for (int row = 0; row < valid_rows; row++) {
+        const __m512 row_gate_scale =
+            _mm512_set1_ps(input_scales[row] * gate_scale);
+        const __m512 row_up_scale =
+            _mm512_set1_ps(input_scales[row] * up_scale);
+        for (int f = 0; f < S3_D_FF; f += 16) {
+            const size_t offset = (size_t)row * S3_D_FF + f;
+            const __m512 vg = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(_mm512_load_si512(
+                    (const __m512i*)(gate_acc + offset))),
+                row_gate_scale);
+            const __m512 vu = _mm512_mul_ps(
+                _mm512_cvtepi32_ps(_mm512_load_si512(
+                    (const __m512i*)(up_acc + offset))),
+                row_up_scale);
+            const __m512 denominator = _mm512_add_ps(
+                one, exp512_ps(_mm512_sub_ps(_mm512_setzero_ps(), vg)));
+            const __m512 silu =
+                _mm512_mul_ps(vg, reciprocal512_ps(denominator));
+            _mm512_store_ps(hidden + offset, _mm512_mul_ps(silu, vu));
+        }
+        hidden_scales[row] = quantize_s3_s8(
+            hidden + (size_t)row * S3_D_FF, S3_D_FF,
+            hidden_q + (size_t)row * S3_D_FF);
+    }
+    if (padded_rows > valid_rows) {
+        std::memset(hidden_q + (size_t)valid_rows * S3_D_FF, 0,
+                    (size_t)(padded_rows - valid_rows) * S3_D_FF);
+    }
+
+    s3_amx_down(hidden_q, padded_rows, valid_rows, down, hidden_scales,
+                down_scale, token_ids, mixtures, shared, x, y);
+}
+#endif
+
 static void moe_forward_optimized_s3(const float* x, const MoEWeights& w,
                                      float* y, int num_tokens) {
+#if defined(__AVX512F__) && defined(__AVX512VNNI__) && \
+    defined(__AMX_TILE__) && defined(__AMX_INT8__)
+    if (!s3_preprocessed) {
+        moe_forward_generic(x, w, y, num_tokens);
+        return;
+    }
+
+    alignas(64)
+        float affinities[S3_NUM_TOKENS][S3_NUM_EXPERTS];
+    alignas(64) int8_t xq[S3_NUM_TOKENS][S3_D_MODEL];
+    alignas(64) float input_scales[S3_NUM_TOKENS];
+    int selected_experts[S3_NUM_TOKENS][S3_TOP_K];
+    float selected_mixtures[S3_NUM_TOKENS][S3_TOP_K];
+    int expert_counts[S3_NUM_EXPERTS] = {};
+
+    for (int first_token = 0; first_token < S3_NUM_TOKENS;
+         first_token += 4) {
+        s3_router_four(x + (size_t)first_token * S3_D_MODEL,
+                       affinities[first_token]);
+    }
+
+    const __m512 bias = _mm512_loadu_ps(w.bias);
+    const __m512 negative_infinity = _mm512_set1_ps(-3.402823466e+38F);
+    for (int token = 0; token < S3_NUM_TOKENS; token++) {
+        const __m512 affinity = _mm512_load_ps(affinities[token]);
+        const __m512 selection_scores = _mm512_add_ps(affinity, bias);
+        __mmask16 available = 0xffff;
+        for (int k = 0; k < S3_TOP_K; k++) {
+            const __m512 candidates = _mm512_mask_mov_ps(
+                negative_infinity, available, selection_scores);
+            const float best_score = _mm512_reduce_max_ps(candidates);
+            const __mmask16 matches =
+                available &
+                _mm512_cmp_ps_mask(candidates,
+                                   _mm512_set1_ps(best_score), _CMP_EQ_OQ);
+            const int expert = __builtin_ctz((unsigned)matches);
+            selected_experts[token][k] = expert;
+            expert_counts[expert]++;
+            available = (__mmask16)(
+                available & (__mmask16)~(1u << expert));
+        }
+
+        float gate_sum = 0.0f;
+        for (int k = 0; k < S3_TOP_K; k++) {
+            gate_sum += affinities[token][selected_experts[token][k]];
+        }
+        for (int k = 0; k < S3_TOP_K; k++) {
+            selected_mixtures[token][k] =
+                affinities[token][selected_experts[token][k]] / gate_sum;
+        }
+        input_scales[token] = quantize_s3_s8(
+            x + (size_t)token * S3_D_MODEL, S3_D_MODEL, xq[token]);
+    }
+
+    int expert_offsets[S3_NUM_EXPERTS + 1] = {};
+    int cursor[S3_NUM_EXPERTS];
+    for (int expert = 0; expert < S3_NUM_EXPERTS; expert++) {
+        expert_offsets[expert + 1] =
+            expert_offsets[expert] + expert_counts[expert];
+        cursor[expert] = expert_offsets[expert];
+    }
+
+    int routed_tokens[S3_ROUTED_ASSIGNMENTS];
+    float routed_mixtures[S3_ROUTED_ASSIGNMENTS];
+    for (int token = 0; token < S3_NUM_TOKENS; token++) {
+        for (int k = 0; k < S3_TOP_K; k++) {
+            const int expert = selected_experts[token][k];
+            const int position = cursor[expert]++;
+            routed_tokens[position] = token;
+            routed_mixtures[position] = selected_mixtures[token][k];
+        }
+    }
+
+    _tile_loadconfig(&s3_tile_config);
+    s3_execute_expert(0, xq[0], S3_NUM_TOKENS, S3_NUM_TOKENS,
+                      input_scales, w.sh_s_gate, w.sh_s_up, w.sh_s_down,
+                      nullptr, nullptr, true, x, y);
+
+    alignas(64) int8_t grouped_xq[S3_NUM_TOKENS][S3_D_MODEL];
+    alignas(64) float grouped_scales[S3_NUM_TOKENS];
+    alignas(64) int grouped_tokens[S3_NUM_TOKENS];
+    alignas(64) float grouped_mixtures[S3_NUM_TOKENS];
+    for (int expert = 0; expert < S3_NUM_EXPERTS; expert++) {
+        const int valid_rows = expert_counts[expert];
+        if (valid_rows == 0) continue;
+        const int padded_rows =
+            (valid_rows + S3_TILE_ROWS - 1) & -S3_TILE_ROWS;
+        const int offset = expert_offsets[expert];
+        for (int row = 0; row < valid_rows; row++) {
+            const int token = routed_tokens[offset + row];
+            std::memcpy(grouped_xq[row], xq[token], S3_D_MODEL);
+            grouped_scales[row] = input_scales[token];
+            grouped_tokens[row] = token;
+            grouped_mixtures[row] = routed_mixtures[offset + row];
+        }
+        if (padded_rows > valid_rows) {
+            std::memset(grouped_xq[valid_rows], 0,
+                        (size_t)(padded_rows - valid_rows) * S3_D_MODEL);
+        }
+
+        s3_execute_expert(
+            expert + 1, grouped_xq[0], padded_rows, valid_rows,
+            grouped_scales, w.s_gate[expert], w.s_up[expert],
+            w.s_down[expert], grouped_tokens, grouped_mixtures, false, x, y);
+    }
+    _tile_release();
+#else
     moe_forward_generic(x, w, y, num_tokens);
+#endif
 }
 
 static void moe_forward_optimized_s4(const float* x, const MoEWeights& w,
