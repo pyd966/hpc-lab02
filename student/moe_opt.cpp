@@ -2466,7 +2466,7 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
         acc_gate[ob] = s1_corrected_accumulator(gate_sums + ob * 16);
         acc_up[ob] = s1_corrected_accumulator(up_sums + ob * 16);
     }
-#pragma GCC unroll 64
+#pragma GCC unroll 32
     for (int rb = 0; rb < gate_reduction_blocks; rb++) {
         uint32_t activation4;
         std::memcpy(&activation4, xq_shifted + rb * 4, 4);
@@ -2522,7 +2522,7 @@ static void s1_expert_ffn(int slot, float s_gate, float s_up, float s_down,
     for (int ob = 0; ob < down_output_blocks; ob++) {
         down_acc[ob] = s1_corrected_accumulator(down_sums + ob * 16);
     }
-#pragma GCC unroll 32
+#pragma GCC unroll 16
     for (int rb = 0; rb < down_reduction_blocks; rb++) {
         uint32_t activation4;
         std::memcpy(&activation4, hq_shifted + rb * 4, 4);
@@ -3502,8 +3502,7 @@ struct alignas(64) S3WorkContext {
 
     S3Task tasks[S3_MAX_TASKS];
     int task_count;
-    int thread_task_count[S3_THREADS];
-    int thread_tasks[S3_THREADS][S3_MAX_TASKS];
+    alignas(64) std::atomic<int> next_task{0};
 
     alignas(64) std::atomic<int> route_arrived{0};
     alignas(64) std::atomic<int> offsets_ready{0};
@@ -3618,19 +3617,7 @@ static void s3_build_tasks(S3WorkContext& work) {
               [](const S3Task& first, const S3Task& second) {
                   return first.cost > second.cost;
               });
-    int thread_cost[S3_THREADS] = {};
-    std::memset(work.thread_task_count, 0, sizeof(work.thread_task_count));
-    for (int task = 0; task < work.task_count; task++) {
-        int best_thread = 0;
-        for (int thread = 1; thread < S3_THREADS; thread++) {
-            if (thread_cost[thread] < thread_cost[best_thread]) {
-                best_thread = thread;
-            }
-        }
-        const int index = work.thread_task_count[best_thread]++;
-        work.thread_tasks[best_thread][index] = task;
-        thread_cost[best_thread] += work.tasks[task].cost;
-    }
+    work.next_task.store(S3_THREADS, std::memory_order_relaxed);
 }
 
 static void s3_execute_worker(int thread, S3WorkContext& work) {
@@ -3734,9 +3721,10 @@ static void s3_execute_worker(int thread, S3WorkContext& work) {
     static thread_local bool amx_ready = request_s3_amx_permission();
     if (!amx_ready) std::abort();
     _tile_loadconfig(&s3_tile_config);
-    for (int index = 0; index < work.thread_task_count[thread]; index++) {
-        const S3Task& task =
-            work.tasks[work.thread_tasks[thread][index]];
+    int index = thread;
+    for (;;) {
+        if (index >= work.task_count) break;
+        const S3Task& task = work.tasks[index];
         if (task.shared) {
             s3_execute_expert(
                 0, work.xq[task.input_row], task.padded_rows,
@@ -3755,6 +3743,7 @@ static void s3_execute_worker(int thread, S3WorkContext& work) {
                 work.grouped_ranks + row, 0,
                 &work.routed_output[0][0][0], false, work.x, work.y);
         }
+        index = work.next_task.fetch_add(1, std::memory_order_relaxed);
     }
     _tile_release();
 
@@ -3974,45 +3963,66 @@ static void s4_router_select(
                                    -3.402823466e+38F};
     float best_affinities[S4_TOP_K] = {};
     selected[0] = selected[1] = S4_NUM_EXPERTS;
-    for (int candidate = 0; candidate < S4_ROUTER_CANDIDATES; candidate++) {
-        const int expert = candidates[candidate];
-        const float* weights =
-            w.w_router + (size_t)expert * S4_D_MODEL;
-        __m512 accumulator[4] = {_mm512_setzero_ps(), _mm512_setzero_ps(),
-                                _mm512_setzero_ps(), _mm512_setzero_ps()};
+    for (int candidate = 0; candidate < S4_ROUTER_CANDIDATES;
+         candidate += 2) {
+        const int experts[2] = {candidates[candidate],
+                                candidates[candidate + 1]};
+        const float* weights0 =
+            w.w_router + (size_t)experts[0] * S4_D_MODEL;
+        const float* weights1 =
+            w.w_router + (size_t)experts[1] * S4_D_MODEL;
+        __m512 accumulator0[4] = {_mm512_setzero_ps(), _mm512_setzero_ps(),
+                                 _mm512_setzero_ps(), _mm512_setzero_ps()};
+        __m512 accumulator1[4] = {_mm512_setzero_ps(), _mm512_setzero_ps(),
+                                 _mm512_setzero_ps(), _mm512_setzero_ps()};
         for (int d = 0; d < S4_D_MODEL; d += 64) {
-            accumulator[0] = _mm512_fmadd_ps(
-                _mm512_loadu_ps(x + d),
-                _mm512_loadu_ps(weights + d), accumulator[0]);
-            accumulator[1] = _mm512_fmadd_ps(
-                _mm512_loadu_ps(x + d + 16),
-                _mm512_loadu_ps(weights + d + 16), accumulator[1]);
-            accumulator[2] = _mm512_fmadd_ps(
-                _mm512_loadu_ps(x + d + 32),
-                _mm512_loadu_ps(weights + d + 32), accumulator[2]);
-            accumulator[3] = _mm512_fmadd_ps(
-                _mm512_loadu_ps(x + d + 48),
-                _mm512_loadu_ps(weights + d + 48), accumulator[3]);
+            const __m512 input0 = _mm512_loadu_ps(x + d);
+            const __m512 input1 = _mm512_loadu_ps(x + d + 16);
+            const __m512 input2 = _mm512_loadu_ps(x + d + 32);
+            const __m512 input3 = _mm512_loadu_ps(x + d + 48);
+            accumulator0[0] = _mm512_fmadd_ps(
+                input0, _mm512_loadu_ps(weights0 + d), accumulator0[0]);
+            accumulator0[1] = _mm512_fmadd_ps(
+                input1, _mm512_loadu_ps(weights0 + d + 16), accumulator0[1]);
+            accumulator0[2] = _mm512_fmadd_ps(
+                input2, _mm512_loadu_ps(weights0 + d + 32), accumulator0[2]);
+            accumulator0[3] = _mm512_fmadd_ps(
+                input3, _mm512_loadu_ps(weights0 + d + 48), accumulator0[3]);
+            accumulator1[0] = _mm512_fmadd_ps(
+                input0, _mm512_loadu_ps(weights1 + d), accumulator1[0]);
+            accumulator1[1] = _mm512_fmadd_ps(
+                input1, _mm512_loadu_ps(weights1 + d + 16), accumulator1[1]);
+            accumulator1[2] = _mm512_fmadd_ps(
+                input2, _mm512_loadu_ps(weights1 + d + 32), accumulator1[2]);
+            accumulator1[3] = _mm512_fmadd_ps(
+                input3, _mm512_loadu_ps(weights1 + d + 48), accumulator1[3]);
         }
-        const __m512 sum01 = _mm512_add_ps(accumulator[0], accumulator[1]);
-        const __m512 sum23 = _mm512_add_ps(accumulator[2], accumulator[3]);
-        const float logit =
-            _mm512_reduce_add_ps(_mm512_add_ps(sum01, sum23));
-        const float affinity = 1.0f / (1.0f + expf(-logit));
-        const float score = affinity + w.bias[expert];
+        const __m512 sum010 = _mm512_add_ps(accumulator0[0], accumulator0[1]);
+        const __m512 sum230 = _mm512_add_ps(accumulator0[2], accumulator0[3]);
+        const __m512 sum011 = _mm512_add_ps(accumulator1[0], accumulator1[1]);
+        const __m512 sum231 = _mm512_add_ps(accumulator1[2], accumulator1[3]);
+        const float logits[2] = {
+            _mm512_reduce_add_ps(_mm512_add_ps(sum010, sum230)),
+            _mm512_reduce_add_ps(_mm512_add_ps(sum011, sum231))};
+        for (int lane = 0; lane < 2; lane++) {
+            const int expert = experts[lane];
+            const float logit = logits[lane];
+            const float affinity = 1.0f / (1.0f + expf(-logit));
+            const float score = affinity + w.bias[expert];
 
-        for (int k = 0; k < S4_TOP_K; k++) {
-            if (score > best_scores[k] ||
-                (score == best_scores[k] && expert < selected[k])) {
-                for (int move = S4_TOP_K - 1; move > k; move--) {
-                    best_scores[move] = best_scores[move - 1];
-                    best_affinities[move] = best_affinities[move - 1];
-                    selected[move] = selected[move - 1];
+            for (int k = 0; k < S4_TOP_K; k++) {
+                if (score > best_scores[k] ||
+                    (score == best_scores[k] && expert < selected[k])) {
+                    for (int move = S4_TOP_K - 1; move > k; move--) {
+                        best_scores[move] = best_scores[move - 1];
+                        best_affinities[move] = best_affinities[move - 1];
+                        selected[move] = selected[move - 1];
+                    }
+                    best_scores[k] = score;
+                    best_affinities[k] = affinity;
+                    selected[k] = expert;
+                    break;
                 }
-                best_scores[k] = score;
-                best_affinities[k] = affinity;
-                selected[k] = expert;
-                break;
             }
         }
     }
@@ -4228,14 +4238,19 @@ static void s4_build_tasks(S4WorkContext& work) {
         }
     }
 
-    std::sort(work.tasks, work.tasks + work.task_count,
-              [](const S4Task& first, const S4Task& second) {
-                  return first.cost > second.cost;
+    int task_order[S4_MAX_TASKS];
+    for (int task = 0; task < work.task_count; task++) {
+        task_order[task] = task;
+    }
+    std::sort(task_order, task_order + work.task_count,
+              [&](int first, int second) {
+                  return work.tasks[first].cost > work.tasks[second].cost;
               });
     int thread_cost[S4_THREADS] = {};
     std::memset(work.thread_task_count, 0,
                 sizeof(work.thread_task_count));
-    for (int task = 0; task < work.task_count; task++) {
+    for (int position = 0; position < work.task_count; position++) {
+        const int task = task_order[position];
         int target = 0;
         const int eligible_threads =
             work.tasks[task].kind == S4TaskKind::RoutedVnni
